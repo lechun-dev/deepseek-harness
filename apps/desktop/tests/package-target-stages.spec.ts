@@ -53,3 +53,14 @@ it.each(['--unsigned', '--prepare-only'])('keeps %s hardware-free and creates no
   for (const call of run.run.mock.calls) expect(call[3].env).not.toHaveProperty('DSH_DESKTOP_WINDOWS_TOKEN_PIN')
   expect(writeFileSync).not.toHaveBeenCalled()
 })
+
+it('packages unsigned macOS without notarized artifact wrapping or a release record', async () => {
+  const { run, stages } = supervisor()
+  await packageTarget(parseDesktopPackageInvocation(['mac-arm64', '--unsigned'], 'darwin', 'arm64'), environment, run)
+  expect(stages[0]).toBe('run build:official')
+  expect(stages.some(stage => stage.includes('--config.mac.notarize=false'))).toBe(false)
+  expect(stages.filter(stage => stage.includes('exec electron-builder'))).toEqual([
+    'exec electron-builder --config electron-builder.config.mjs --mac --arm64 --publish never',
+  ])
+  expect(writeFileSync).not.toHaveBeenCalled()
+})

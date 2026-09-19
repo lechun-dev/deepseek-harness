@@ -1,0 +1,58 @@
+name: Package unsigned macOS desktop
+
+# 2026-09-19 coder(lq): fork-friendly unsigned Mac desktop package without Apple Developer ID.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  package-mac-arm64-unsigned:
+    name: unsigned mac-arm64
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Write unsigned macOS packaging env
+        run: |
+          cat > apps/desktop/.env.macos <<'EOF'
+          DSH_DESKTOP_APP_ID=com.deepseek.harness
+          DSH_DESKTOP_AUTO_UPDATE_ENV=test
+          DOWNLOAD_TEST_ORIGIN=https://example.invalid
+          DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=https://harness-test.deepseek.com
+          DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
+          DSH_DESKTOP_MACOS_SIGNING_IDENTITY=
+          DSH_DESKTOP_MACOS_TEAM_ID=
+          CSC_LINK=
+          CSC_KEY_PASSWORD=
+          EOF
+
+      - name: Package unsigned macOS arm64
+        run: pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:unsigned
+
+      - name: Upload unsigned artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-desktop-mac-arm64-unsigned
+          if-no-files-found: error
+          path: |
+            apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg
+            apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.zip
+          retention-days: 14
