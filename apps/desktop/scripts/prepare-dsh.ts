@@ -22,6 +22,7 @@ import { writeDesktopRuntime, verifyDesktopRuntime } from '../src/runtime-tree.t
 import {
   resolveDesktopAppId,
   resolveMacOSSigningEnvironment,
+  shouldSignMacOSDesktopRuntime,
 } from './desktop-release-environment.mjs'
 import {
   signMacOSRuntime,
@@ -143,7 +144,8 @@ async function main(): Promise<void> {
     if (!existsSync(join(DSH_OUTPUT_ROOT, 'node_modules', '@deepseek-ai', `libreoffice-kit-${officeEngine}`, 'prebuilds.json'))) {
       throw new Error(`desktop runtime: missing required LibreOffice engine ${officeEngine}`)
     }
-    if (process.platform === 'darwin') {
+    // 2026-09-19 coder(lq): unsigned packages skip Developer ID signing of the bundled native runtime.
+    if (shouldSignMacOSDesktopRuntime(process.env)) {
       await signMacOSRuntime(DSH_OUTPUT_ROOT, resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env))
       await signMacOSRuntime(join(RUNTIME_ROOT, 'primary-runtime'), resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env))
     }

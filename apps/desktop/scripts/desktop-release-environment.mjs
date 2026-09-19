@@ -63,6 +63,20 @@ export function resolveMacOSSigningEnvironment(env) {
 }
 
 /**
+ * Whether prepare-dsh should codesign native runtime files on this host.
+ * @param {NodeJS.ProcessEnv} env - Packaging environment.
+ * @param {NodeJS.Platform} [platform] - Host platform.
+ * @returns {boolean} True only for signed macOS packaging.
+ */
+export function shouldSignMacOSDesktopRuntime(env, platform = process.platform) {
+  // 2026-09-19 coder(lq): unsigned Mac packages have no Developer ID, so skip native runtime signing.
+  if (env.DSH_DESKTOP_UNSIGNED !== undefined && env.DSH_DESKTOP_UNSIGNED !== '' && !['0', '1'].includes(env.DSH_DESKTOP_UNSIGNED)) {
+    throw new Error('desktop release environment: DSH_DESKTOP_UNSIGNED must be 0 or 1')
+  }
+  return platform === 'darwin' && env.DSH_DESKTOP_UNSIGNED !== '1'
+}
+
+/**
  * Resolve one complete credential set accepted by Apple's notary service.
  * @param {NodeJS.ProcessEnv} env - Packaging environment.
  * @returns {{ appleId: string, appleIdPassword: string, teamId: string } | { appleApiKey: string, appleApiKeyId: string, appleApiIssuer: string } | { keychainProfile: string, keychain?: string }} Notary credentials without the submitted artifact path.

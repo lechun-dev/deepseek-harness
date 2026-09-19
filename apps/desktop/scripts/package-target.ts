@@ -330,6 +330,8 @@ export async function packageTarget(
     ...buildEnv,
     DSH_DESKTOP_TARGET_PLATFORM: target.platform,
     DSH_DESKTOP_TARGET_ARCH: target.arch,
+    // 2026-09-19 coder(lq): prepare:dsh reads this flag to skip Developer ID signing for unsigned Mac packages.
+    DSH_DESKTOP_UNSIGNED: invocation.unsigned ? '1' : '0',
   }
   const electronBuilderEnv = desktopElectronBuilderEnvironment(targetEnv, invocation.unsigned)
   for (const name of WINDOWS_SIGNING_ENV_NAMES) {
