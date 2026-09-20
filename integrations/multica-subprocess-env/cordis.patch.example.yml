@@ -1,0 +1,15 @@
+# Profile patch row for @lechun-dev/dsh-multica-subprocess-env.
+#
+# Append it to the patch layer of the profile that runs Multica tasks
+# (~/.dsh/profiles/multica/cordis.patch.yml), or to the home-level layer
+# (~/.dsh/cordis.patch.yml) to cover every profile on this machine. Rows in a
+# patch layer are applied after every bundle layer, so this insert decorates
+# whichever `ctx.subprocess` provider the profile mounted.
+#
+# Replace the path with this checkout's absolute path; the loader imports the
+# row by path, and the file must exist (run ./install.sh, which builds it).
+#
+# Nothing restarts after the edit: each task starts a new harness process.
+- insert:
+    - id: multica-subprocess-env
+      name: '/absolute/path/to/DSH/integrations/multica-subprocess-env/lib/index.js'

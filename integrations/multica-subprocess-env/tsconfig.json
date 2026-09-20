@@ -1,0 +1,30 @@
+{
+  // Fork-local module: it sits outside the pnpm workspace, so its two type
+  // dependencies resolve through this paths map instead of a package-local
+  // node_modules. Both targets are produced by `pnpm run build:lib:host`.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "declaration": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "lib",
+    "paths": {
+      "@deepseek-ai/cordis": ["../../vendor/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-subprocess": ["../../packages/subprocess/subprocess/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
