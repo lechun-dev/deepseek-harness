@@ -10,7 +10,7 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { WEB_LISTEN_VERSION, type WebListenRecord } from '@deepseek-ai/dsh-app-boot'
-import { adoptPublishedService, type DesktopHostChannel } from '../src/index.ts'
+import { adoptPublishedService, desktopHostWebArgs, type DesktopHostChannel } from '../src/index.ts'
 
 const record: WebListenRecord = {
   version: WEB_LISTEN_VERSION,
@@ -74,5 +74,11 @@ describe('adoptPublishedService', () => {
     channel.connected = false
     await adoptPublishedService(record, channel)
     expect(channel.sent).toEqual([])
+  })
+})
+
+describe('desktopHostWebArgs', () => {
+  it('lets Desktop boot on a free loopback port when the Web default is occupied', () => {
+    expect(desktopHostWebArgs()).toEqual(['--no-open', '--port', '0'])
   })
 })

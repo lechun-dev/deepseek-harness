@@ -10,6 +10,18 @@ import * as desktopOffice from './office.ts'
 
 import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 
+/**
+ * Arguments owned by the Desktop-launched Web runner.
+ *
+ * The Host still adopts an already-published service for this Harness home
+ * before it boots. When no adoptable sibling exists, let the Web server choose
+ * a free loopback port instead of competing for the Web CLI's default 3080;
+ * Electron uses the authenticated URL reported after boot.
+ */
+export function desktopHostWebArgs(): readonly string[] {
+  return ['--no-open', '--port', '0']
+}
+
 /** The parent IPC channel this Host is spawned with; `process` in production. */
 export interface DesktopHostChannel {
   readonly connected: boolean
@@ -69,9 +81,7 @@ async function main(): Promise<void> {
     resolutionMode: process.argv[5] === 'runtime' ? 'runtime' : 'link',
     resolvedProfile: { profile, installAnchor },
     patchFiles: [],
-    // The port is the Web profile's own default: one Harness home serves one Web
-    // runtime, so the desktop must not name a second default to compete with it.
-    args: ['--no-open'],
+    args: desktopHostWebArgs(),
     ...(process.argv[6] === undefined ? {} : {
       packageManager: {
         command: process.execPath,
