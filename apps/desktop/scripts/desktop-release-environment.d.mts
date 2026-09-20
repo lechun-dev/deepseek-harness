@@ -54,6 +54,14 @@ export function resolveDesktopAppId(env: NodeJS.ProcessEnv): string
 export function resolveMacOSSigningEnvironment(env: NodeJS.ProcessEnv): MacOSSigningEnvironment
 
 /**
+ * Whether prepare-dsh should codesign native runtime files on this host.
+ * @param env - Packaging environment.
+ * @param platform - Host platform.
+ * @returns True only for signed macOS packaging.
+ */
+export function shouldSignMacOSDesktopRuntime(env: NodeJS.ProcessEnv, platform?: NodeJS.Platform): boolean
+
+/**
  * Resolve one complete credential set accepted by Apple's notary service.
  * @param env - Packaging environment.
  * @returns Notary credentials without the submitted artifact path.

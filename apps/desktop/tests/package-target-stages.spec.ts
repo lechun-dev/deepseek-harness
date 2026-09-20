@@ -62,5 +62,8 @@ it('packages unsigned macOS without notarized artifact wrapping or a release rec
   expect(stages.filter(stage => stage.includes('exec electron-builder'))).toEqual([
     'exec electron-builder --config electron-builder.config.mjs --mac --arm64 --publish never',
   ])
+  // 2026-09-19 coder(lq): prepare:dsh must see the unsigned flag or it still demands a signing identity.
+  const prepareDsh = run.run.mock.calls.find(call => call[0] === 'run prepare:dsh')
+  expect(prepareDsh?.[3].env.DSH_DESKTOP_UNSIGNED).toBe('1')
   expect(writeFileSync).not.toHaveBeenCalled()
 })
