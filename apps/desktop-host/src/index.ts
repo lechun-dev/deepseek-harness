@@ -1,7 +1,7 @@
 /** Launch the Desktop profile through the Web application and report its URL to Electron. */
 
 import { delimiter, join } from 'node:path'
-import { loadLayeredEnv, loadProfileDirectory } from '@deepseek-ai/dsh-app-boot'
+import { loadLayeredEnv, loadProfileDirectory, probeWebListen, type WebListenRecord } from '@deepseek-ai/dsh-app-boot'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -10,9 +10,57 @@ import * as desktopOffice from './office.ts'
 
 import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 
+/** The parent IPC channel this Host is spawned with; `process` in production. */
+export interface DesktopHostChannel {
+  readonly connected: boolean
+  on(event: 'message', listener: (message: unknown) => void): unknown
+  once(event: 'disconnect', listener: () => void): unknown
+  send?(message: unknown, callback?: (error: Error | null) => void): boolean
+  disconnect(): void
+}
+
+/**
+ * Report the Web service this Harness home already publishes, then stay alive as
+ * the backend handle Electron started.
+ *
+ * This process boots no Harness: the published service owns the session log, the
+ * workspace, and every plugin row, so it is the one surface both the browser and
+ * the desktop window talk to. Stopping this child therefore cannot stop that
+ * service — nothing here is holding it.
+ * @param record - the live service published on this Harness home.
+ * @param channel - parent IPC channel to report over.
+ * @returns completion once Electron disconnects this child.
+ */
+export async function adoptPublishedService(
+  record: WebListenRecord,
+  channel: DesktopHostChannel = process,
+): Promise<void> {
+  if (!channel.connected) return
+  channel.on('message', (message: unknown) => {
+    if (typeof message !== 'object' || message === null || !('type' in message)) return
+    if (message.type === 'shutdown') channel.disconnect()
+    // Answer task control rather than leave the update flow waiting: this child
+    // owns no tasks, and the composer names the adopted service as the owner.
+    if (message.type === 'update-tasks' && 'requestId' in message && Number.isSafeInteger(message.requestId)) {
+      channel.send?.({ type: 'update-tasks', requestId: message.requestId, active: true,
+        error: 'desktop update: the adopted Web service owns this session' }, (error) => { if (error !== null) console.error(error) })
+    }
+  })
+  await new Promise<void>((resolve) => {
+    channel.once('disconnect', resolve)
+    channel.send?.({ type: 'ready', url: record.url, injections: record.injections, attached: true },
+      (error) => { if (error !== null) console.error(error) })
+  })
+}
+
 async function main(): Promise<void> {
   const runtimeDir = process.argv[2] as string
   const projectDir = process.argv[3] as string
+  const adopted = await probeWebListen(resolveDshHome())
+  if (adopted !== undefined) {
+    await adoptPublishedService(adopted)
+    return
+  }
   const installAnchor = join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
   const profile = loadProfileDirectory('dsh', projectDir, installAnchor)
   const application = runProfile({
@@ -21,7 +69,9 @@ async function main(): Promise<void> {
     resolutionMode: process.argv[5] === 'runtime' ? 'runtime' : 'link',
     resolvedProfile: { profile, installAnchor },
     patchFiles: [],
-    args: ['--no-open', '--port', '19387'],
+    // The port is the Web profile's own default: one Harness home serves one Web
+    // runtime, so the desktop must not name a second default to compete with it.
+    args: ['--no-open'],
     ...(process.argv[6] === undefined ? {} : {
       packageManager: {
         command: process.execPath,

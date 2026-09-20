@@ -8,6 +8,8 @@ interface ReadyEvent {
   readonly type: 'ready'
   readonly url: string
   readonly injections?: readonly unknown[] | undefined
+  /** The child adopted a service published by another surface instead of serving its own. */
+  readonly attached?: boolean | undefined
 }
 
 interface FatalEvent {
@@ -32,6 +34,7 @@ function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
       return true
     case 'ready':
       return typeof candidate.url === 'string'
+        && (candidate.attached === undefined || typeof candidate.attached === 'boolean')
     case 'fatal':
       return typeof candidate.message === 'string'
     case 'update-tasks':
@@ -59,6 +62,8 @@ async function exitsWithin(exit: Promise<void>, milliseconds: number): Promise<b
 export interface DesktopHostReady {
   readonly url: string
   readonly injections?: readonly unknown[] | undefined
+  /** The child adopted a service published by another surface instead of serving its own. */
+  readonly attached: boolean
 }
 
 /** The child has exited, but task teardown did not finish successfully. */
@@ -136,7 +141,9 @@ export class DesktopHostProcess {
         child.kill('SIGTERM')
         return
       }
-      if (message.type === 'ready') this.readyResolve({ url: message.url, injections: message.injections })
+      if (message.type === 'ready') {
+        this.readyResolve({ url: message.url, injections: message.injections, attached: message.attached === true })
+      }
       else if (message.type === 'shutdown-complete') {
         if (this.stopping) this.shutdownCompleted = true
         else this.fail(new Error('dsh desktop host acknowledged an unrequested shutdown'))

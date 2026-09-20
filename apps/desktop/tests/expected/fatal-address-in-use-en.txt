@@ -1,5 +1,5 @@
 DeepSeek Harness is unavailable
 The application could not start or stopped unexpectedly.
-Another DSH instance (such as dsh web or the desktop app) is running. They cannot start at the same time. Quit the other running DSH instance, then restart.
+This Harness home shares one Web service, and the Web port is held by something else — another program, or a Harness serving a different home. Quit whatever holds that port, then restart.
 Exit
 Restart

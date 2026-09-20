@@ -12,6 +12,7 @@ import { loadLayeredEnv, StartupError } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { parseDshArgs } from './args.ts'
 import { reportStartupFailure } from './startup-diagnostics.ts'
+import { adoptedWebService } from './web-adopt.ts'
 
 // Both the source tree (apps/cli/src) and the bundled bin (apps/cli/lib) sit
 // one directory under apps/cli, so the checked-in manifest resolves with the
@@ -33,6 +34,13 @@ export async function runCli(): Promise<void> {
 
   switch (invocation.mode) {
     case 'profile': {
+      const adopted = await adoptedWebService(invocation.profile, invocation.args)
+      if (adopted !== undefined) {
+        // One Harness home serves one Web runtime; a second surface adopts it
+        // rather than binding a socket the first one owns.
+        console.log(`dsh web: already serving at ${adopted}; this invocation uses that service`)
+        break
+      }
       const { runProfile } = await import('./profile-boot.ts')
       try {
         await runProfile({

@@ -87,11 +87,15 @@ URL 行与浏览器交接都是就绪信号：监督方一观察到该行就发�
 
 `resolveLanTrust` 在启动时只采样一次网络：loopback 绑定（`127.0.0.1`）不派生任何 LAN 地址，绑定所有网卡则会加入每个非 internal IPv4 字面量。派生字面量加上显式的 `--trusted-host` 权威标识组成 `/api` 浏览器信任栅栏，打印的 LAN URL 始终与该栅栏一致。
 
+### 共享监听记录
+
+每个 Web 运行时在就绪后都会发布 `<home>/web-listen.json`（权限 `0600`），无论它是否打印 URL：里面是带 token 的根 URL，以及一份索引注入快照。同一个 Harness home 上的另一个形态会探测这条记录并采用正在运行的服务，而不是再绑一个端口；因此一个 home 只服务一个 Web 运行时，浏览器和桌面窗口共用它的会话与流。存活判定用的是记录自身的 token 交换 —— 记录里的 URL 必须返回那个换取浏览器 cookie 的 303 —— 所以占着该端口的其他程序冒充不了这个服务。卸载时删除该记录，且只会删除自己写的那条。
+
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `web-app` 粘合插件：dist 解析、LAN 信任采样、提示词段落、bash 变量、URL 行、浏览器交接 |
+| [`src/index.ts`](src/index.ts) | `web-app` 粘合插件：dist 解析、LAN 信任采样、提示词段落、bash 变量、URL 行、浏览器交接、共享监听记录 |
 | [`src/startup.ts`](src/startup.ts) | `web-startup` 提供方：`--host`、`--port`、`--trusted-host`、`--no-open`、`--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | Web patch：重述的基础值、Web 宿主行、浏览器名录、由 preset 承载的 agent 层 |
 | — | 不发布运行时不变式伴生入口；每项贡献（frontend-static 子插件、提示词段落、bashEnv 注册）都会随 fiber 由注册表释放，且每个所属注册表的包负责该关系的不变式；本包不持有需要审计的可变状态。 |

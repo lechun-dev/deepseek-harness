@@ -252,13 +252,18 @@ async function main(): Promise<void> {
       development ? join(app.getAppPath(), '.desktop-build', 'targets', `${process.platform === 'darwin' ? 'mac' : 'win'}-${process.arch}`, 'runtime', 'primary-runtime')
         : join(process.resourcesPath, 'runtime', 'primary-runtime'),
       development ? 'link' : 'runtime', resources)
+    // An adopting Host owns no Harness, so no task control exists to hand over
+    // when an update has to stop it.
+    let adopted = false
     return {
+      get attached() { return adopted },
       start: async () => {
         const ready = await host.start()
         hostCookie = await authenticateWebHost(ready.url)
         hostUrl = ready.url
         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
         injections = ready.injections
+        adopted = ready.attached
       },
       stop: async () => {
         try { await host.stop(requireCleanStop) }
@@ -344,7 +349,7 @@ async function main(): Promise<void> {
       await workspaceRecovery
       await startup?.catch(() => undefined)
       const host = backend.host
-      if (host === undefined) throw new DesktopUpdatePreparationError('tasks-unavailable', messages.updateTasksUnavailable)
+      if (host === undefined || host.attached) throw new DesktopUpdatePreparationError('tasks-unavailable', messages.updateTasksUnavailable)
       const active = await host.updateTasks('inspect')
       const confirmation: Electron.MessageBoxOptions = {
         type: active ? 'warning' : 'info', title: messages.updateTitle,

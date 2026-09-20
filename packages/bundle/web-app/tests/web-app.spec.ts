@@ -7,7 +7,7 @@
 
 import { EventEmitter } from 'node:events'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -71,7 +71,10 @@ function stageDist(): string {
 }
 
 /** A fake webServer capturing the fallback seat and index taps. */
-function fakeHttpServer(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1'): { server: WebServer; seat: () => unknown } {
+function fakeHttpServer(
+  host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
+  injections: readonly unknown[] = [],
+): { server: WebServer; seat: () => unknown } {
   let fallback: unknown
   const server = {
     host,
@@ -81,6 +84,7 @@ function fakeHttpServer(host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1'): { server: 
       return () => { fallback = undefined }
     },
     renderIndex: (html: string) => html,
+    collectIndexInjections: () => [...injections],
   } as unknown as WebServer
   return { server, seat: () => fallback }
 }
@@ -216,6 +220,30 @@ describe('web-app runtime glue', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token')
     await ctx.fiber.dispose()
+  })
+
+  it('publishes the shared listen record and clears it on teardown', async () => {
+    stageDist()
+    const home = mkdtempSync(join(tmpdir(), 'dsh-web-listen-'))
+    onTestFinished(() => { rmSync(home, { recursive: true, force: true }) })
+    const ctx = new Context()
+    ctx.provide('dshHomePath', (...segments: string[]) => join(home, ...segments))
+    ctx.provide('webServer', fakeHttpServer('127.0.0.1', [{ kind: 'global', name: 'agent', value: 'worker' }]).server)
+    provideConnection(ctx)
+    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [] }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(AppBoot.readWebListen(home)).toEqual({
+      version: 1,
+      pid: process.pid,
+      port: 4567,
+      url: 'http://127.0.0.1:4567/?token=test-token',
+      injections: [{ kind: 'global', name: 'agent', value: 'worker' }],
+    })
+    expect(statSync(AppBoot.webListenPath(home)).mode & 0o777).toBe(0o600)
+
+    await ctx.fiber.dispose()
+    expect(AppBoot.readWebListen(home)).toBeUndefined()
   })
 
   it('does not publish readiness again when Connection reloads', async () => {

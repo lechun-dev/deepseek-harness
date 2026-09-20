@@ -87,11 +87,15 @@ The URL line and browser handoff are readiness signals: supervisors RPC as soon 
 
 `resolveLanTrust` samples the network once at boot: a loopback bind (`127.0.0.1`) derives no LAN addresses, while an all-interfaces bind adds every non-internal IPv4 literal. The derived literals plus the explicit `--trusted-host` authorities form the `/api` browser-trust fence, and the printed LAN URL always matches that fence.
 
+### Shared listen record
+
+Every Web runtime publishes `<home>/web-listen.json` (mode `0600`) once it is ready, whether or not it prints a URL: the authenticated root URL beside one index-injection snapshot. Another surface on the same Harness home probes that record and adopts the running service instead of binding a second socket, so one home serves one Web runtime and a browser and the desktop window share its sessions and streams. Liveness is the record's own token exchange — the recorded URL must answer the 303 that mints a browser cookie — so a foreign listener on that port cannot pass as this service. Disposal removes the record, and only the process it names.
+
 ### Source map
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | The `web-app` glue plugin: dist resolution, LAN trust sampling, prompt sections, bash variable, URL line, browser handoff |
+| [`src/index.ts`](src/index.ts) | The `web-app` glue plugin: dist resolution, LAN trust sampling, prompt sections, bash variable, URL line, browser handoff, shared listen record |
 | [`src/startup.ts`](src/startup.ts) | The `web-startup` provider: `--host`, `--port`, `--trusted-host`, `--no-open`, `--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | The web patch: restated base values, web host rows, browser roster, agent plane behind presets |
 | — | No runtime invariant companion is published; every contribution (frontend-static child plugin, prompt section, bashEnv registration) is registry-disposed with the fiber, and each owning registry's package carries that relation's invariant; the package holds no mutable state of its own to audit. |

@@ -110,6 +110,29 @@ describe('desktop host process', () => {
     expect(failure).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['attached', ', attached: true', true],
+    ['serving its own', '', false],
+  ])('reports whether the ready Host adopted a published Web service: %s', async (_case, attachedField, expected) => {
+    const runtime = projectWithHost(`
+      import { createServer } from 'node:http'
+      const server = createServer((request, response) => response.end('running'))
+      server.listen(0, '127.0.0.1', () => {
+        process.send({ type: 'ready', url: 'http://127.0.0.1:' + server.address().port + '/?token=fixture'${attachedField} })
+      })
+      process.on('message', message => {
+        if (message.type !== 'shutdown') return
+        server.close(() => { process.send({ type: 'shutdown-complete' }, () => process.disconnect()) })
+        server.closeAllConnections()
+      })
+    `)
+    const host = hostProcess(runtime)
+    const ready = await host.start()
+    expect(ready.attached).toBe(expected)
+    expect(new URL(ready.url).searchParams.get('token')).toBe('fixture')
+    await host.stop()
+  })
+
   it('passes external dependencies and runtime profile resolution to the Host', async () => {
     const runtime = projectWithHost(HTTP_HOST.replace('runtime: process.argv[2]',
       'pnpm: process.argv[6], nodeBin: process.argv[7], primaryRuntime: process.argv[4], profileResolution: process.argv[5], runtime: process.argv[2]'))
@@ -176,6 +199,7 @@ describe('desktop host process', () => {
   it.each([
     ["process.send({ type: 'fatal', message: 'startup failed' }); process.disconnect()", 'startup failed'],
     ["process.send({ type: 'ready', url: 4 })", 'invalid IPC event'],
+    ["process.send({ type: 'ready', url: 'http://127.0.0.1:3080/', attached: 'true' })", 'invalid IPC event'],
     ['process.exit(0)', 'host stopped'],
   ])('rejects startup when the child fails before readiness: %s', async (source, message) => {
     const host = hostProcess(projectWithHost(source))
