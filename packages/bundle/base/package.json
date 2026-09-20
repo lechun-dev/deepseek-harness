@@ -25,6 +25,7 @@
   "files": [
     "lib/index.js",
     "cordis.patch.yml",
+    "plugins/multica-subprocess-env.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

@@ -150,6 +150,9 @@ function workspaceManifests(): WorkspaceManifest[] {
 const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // Owned Worker bundles import this public bootstrap before their business entry.
   '@deepseek-ai/dsh-app-boot': ['lib/worker/profile-resolution-bootstrap.js'],
+  // The lechun fork publishes one plugin snapshot beside the base bundle's patch,
+  // which inserts it as a row and resolves it by path relative to that patch.
+  '@deepseek-ai/dsh-base': ['plugins/multica-subprocess-env.js'],
   // Statically linked client libraries keep their stylesheets next to the emitted
   // JavaScript, which imports them by relative path: the compile shell runs
   // them through its own CSS pipeline, so the sheets are published artifacts.

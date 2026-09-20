@@ -1,5 +1,8 @@
 # Profile patch row for @lechun-dev/dsh-multica-subprocess-env.
 #
+# This fork already ships the plugin in @deepseek-ai/dsh-base. Use this file
+# only against official npm dsh (or a machine not running this checkout).
+#
 # Append it to the patch layer of the profile that runs Multica tasks
 # (~/.dsh/profiles/multica/cordis.patch.yml), or to the home-level layer
 # (~/.dsh/cordis.patch.yml) to cover every profile on this machine. Rows in a

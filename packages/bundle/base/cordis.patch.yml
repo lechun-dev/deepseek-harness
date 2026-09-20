@@ -206,6 +206,10 @@
     - id: subprocess
       name: '@deepseek-ai/dsh-subprocess-local'
 
+    # 2026-09-20 coder(lq): fork 默认转发 MULTICA_TOKEN，避免 MissionOS 任务子进程被 seam 清掉凭据。
+    - id: multica-subprocess-env
+      name: './plugins/multica-subprocess-env.js'
+
     # Every shipped CLI mode starts with the same file-effect boundary.
     # The environment remains an explicit deployment override; otherwise fresh
     # sessions pin workspace-write + ask through the permission service below.

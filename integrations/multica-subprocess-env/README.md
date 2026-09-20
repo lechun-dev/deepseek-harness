@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Fork-local DeepSeek Harness plugin that puts the Multica task credential (`MULTICA_TOKEN`) into every child process the harness starts through `ctx.subprocess`. Without it, the seam's credential scrub removes the token and every `multica` command inside a task fails closed. It changes no harness file, imports nothing at runtime, and unloading restores exactly what it decorated. The module deliberately sits outside the pnpm workspace so upstream merges never touch it.
+Fork-local DeepSeek Harness plugin that puts the Multica task credential (`MULTICA_TOKEN`) into every child process the harness starts through `ctx.subprocess`. Without it, the seam's credential scrub removes the token and every `multica` command inside a task fails closed. This fork ships a snapshot of it in `@deepseek-ai/dsh-base`, so CLI, web, and desktop built from this checkout load it with no extra profile row. The source still sits outside the pnpm workspace so upstream merges never treat it as a release member, and unloading restores exactly what it decorated.
 
 ## Table of Contents
 
@@ -39,12 +39,12 @@ cd /Users/lq/work/lechun/code/DSH/integrations/multica-subprocess-env
 node ../../node_modules/typescript/bin/tsc -p tsconfig.json
 ```
 
-`install.sh` beside this file does the build for you and runs the suite (`bash install.sh`); `bash install.sh --wire --yes` also appends the profile row shown below. The build needs the repository built once (`pnpm run build:lib:host`), because the module's two type dependencies resolve to `vendor/cordis/lib/types` and `packages/subprocess/subprocess/lib/types` through its own `tsconfig.json` paths map. Nothing else is installed: the emitted `lib/index.js` has no imports, and the repository's `.gitignore` already excludes `lib/`.
+`install.sh` beside this file does the build for you, refreshes the `dsh-base` snapshot, and runs the suite (`bash install.sh`). `bash install.sh --wire --yes` also appends the profile row shown below, and is only for official npm `dsh`; skip `--wire` on this checkout so the profile does not get a second copy. The build needs the repository built once (`pnpm run build:lib:host`), because the module's two type dependencies resolve to `vendor/cordis/lib/types` and `packages/subprocess/subprocess/lib/types` through its own `tsconfig.json` paths map. Nothing else is installed: the emitted `lib/index.js` has no imports, and the repository's `.gitignore` already excludes `lib/`.
 
 <a id="wire-it-into-a-profile"></a>
 ## Wire it into a profile
 
-Append one patch row to the profile that runs Multica tasks, `~/.dsh/profiles/multica/cordis.patch.yml` (or to `~/.dsh/cordis.patch.yml` to cover every profile on the machine):
+This fork already inserts the plugin in `packages/bundle/base/cordis.patch.yml`. Do not append a second row to `~/.dsh/profiles/multica/cordis.patch.yml` when running this checkout. The example below is only for official npm `dsh` (or any machine that is not running this fork); write it to `~/.dsh/profiles/multica/cordis.patch.yml` (or to `~/.dsh/cordis.patch.yml` to cover every profile on the machine):
 
 ```yaml
 - insert:
@@ -101,7 +101,7 @@ Source and tests are plain ESM. `src/index.ts` imports only types, so the emitte
 - **The forwarded set is fixed in source.** `FORWARDED_ENV_NAMES` declares `MULTICA_TOKEN` only, matching what the runner injects today; a second credential-shaped name is a one-line change plus a test, and no configuration surface exists until a second consumer needs one.
 - **Children the harness does not spawn are out of reach.** An MCP stdio server is started by the MCP SDK rather than through the seam, so it needs the `env` field of its own `mcp-client` configuration; the same holds for any plugin calling `child_process` directly.
 - **An in-place decorator follows the seam, not the implementation.** If upstream renames `spawn` or `spawnTerminal`, the wrappers stop matching and the credential silently disappears; `tests/child-env.test.mjs` fails on that change instead of letting it ship, and the fix is to re-point the two captured methods.
-- **`lib/` is build output.** It is ignored by the repository's `.gitignore`, so a fresh clone must run the build before the profile row can load the module.
+- **`lib/` is build output.** It is ignored by the repository's `.gitignore`, so `install.sh --wire` against official npm `dsh` still needs a local build; this fork's committed snapshot in `packages/bundle/base/plugins/` does not.
 - **Verification needs a harness.** Both real-process suites skip when no installed harness is found, which keeps the pure units runnable anywhere but leaves the end-to-end assertion to a machine that has one.
 
 <a id="dev-note"></a>
@@ -110,6 +110,6 @@ Source and tests are plain ESM. `src/index.ts` imports only types, so the emitte
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-Written for the lechun fork on 2026-09-20, replacing a temporary patch to the installed `dsh-subprocess` package plus an agent environment variable. Verified on this machine against the installed harness (`dsh 0.1.5-rc.2`, Node 22) with the fork checkout at `0.1.6-alpha.2`: the control spawn reported `<unset>` while the decorated spawn reported the token, and the Loader mounted both rows from a generated `cordis.yml` with no unloaded entries. `dsh --profile multica --patch <patch> --dump-config` composes the insert row last, after the bundle layers. The module is intentionally not a workspace package: `packages/*/*` members are publishable release members, and adding one would also churn `docs/config-catalog.md`, `docs/module-graph.md`, `tsconfig.base.json`, and `pnpm-lock.yaml` on every upstream merge.
+Written for the lechun fork on 2026-09-20, replacing a temporary patch to the installed `dsh-subprocess` package plus an agent environment variable. This fork now ships a snapshot of the built module in `@deepseek-ai/dsh-base`, so CLI, web, and desktop from this checkout load it without a profile row; `install.sh --wire` remains only for official npm `dsh`. Verified on this machine against the installed harness (`dsh 0.1.5-rc.2`, Node 22) with the fork checkout at `0.1.6-alpha.2`: the control spawn reported `<unset>` while the decorated spawn reported the token, and the Loader mounted both rows from a generated `cordis.yml` with no unloaded entries. `dsh --profile multica --patch <patch> --dump-config` composes a profile insert last, after the bundle layers. The module is intentionally not a workspace package: `packages/*/*` members are publishable release members, and adding one would also churn `docs/config-catalog.md`, `docs/module-graph.md`, `tsconfig.base.json`, and `pnpm-lock.yaml` on every upstream merge.
 
 </details>

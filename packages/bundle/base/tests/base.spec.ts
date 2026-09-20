@@ -18,6 +18,7 @@ describe('dsh-base bundle', () => {
       readFileSync(resolve(root, 'package.json'), 'utf8'),
     ) as {
       dependencies?: Record<string, string>
+      files?: string[]
       dsh?: { bundle?: { patch?: string } }
     }
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
@@ -47,6 +48,12 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-codex')
     expect(manifest.dependencies).not.toHaveProperty('@deepseek-ai/dsh-subagent-claude-code')
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-web-fetch-http')
+    // 2026-09-20 coder(lq): fork ships the Multica subprocess env plugin in the base bundle.
+    expect(rows.find(row => row.id === 'multica-subprocess-env')).toMatchObject({
+      name: './plugins/multica-subprocess-env.js',
+    })
+    expect(manifest.files).toContain('plugins/multica-subprocess-env.js')
+    expect(existsSync(resolve(root, 'plugins/multica-subprocess-env.js'))).toBe(true)
   })
 
   it('gates each shell stack by platform with a symmetric disabled expression', () => {

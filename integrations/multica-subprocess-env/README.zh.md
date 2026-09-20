@@ -4,7 +4,7 @@
 
 ## 概述
 
-这是 fork 本地的 DeepSeek Harness 插件：把 Multica 任务凭据（`MULTICA_TOKEN`）送进 harness 通过 `ctx.subprocess` 启动的每一个子进程。没有它，seam 的凭据清除会把这个变量删掉，任务里的每条 `multica` 命令都会 fail-closed。它不改动 harness 的任何文件，运行时没有任何 import，卸载时会精确还原被装饰的方法。模块刻意放在 pnpm workspace 之外，因此合并上游代码永远不会碰到它。
+这是 fork 本地的 DeepSeek Harness 插件：把 Multica 任务凭据（`MULTICA_TOKEN`）送进 harness 通过 `ctx.subprocess` 启动的每一个子进程。没有它，seam 的凭据清除会把这个变量删掉，任务里的每条 `multica` 命令都会 fail-closed。这个 fork 已经把一份快照打进 `@deepseek-ai/dsh-base`，所以从本检出构建的 CLI、Web、桌面都会默认加载它，不必再往 profile 加一行。源码仍放在 pnpm workspace 之外，合并上游时不会被当成 release member；卸载时会精确还原被装饰的方法。
 
 ## 目录
 
@@ -39,12 +39,12 @@ cd /Users/lq/work/lechun/code/DSH/integrations/multica-subprocess-env
 node ../../node_modules/typescript/bin/tsc -p tsconfig.json
 ```
 
-本文件旁边的 `install.sh` 会替你构建并跑测试（`bash install.sh`）；`bash install.sh --wire --yes` 还会把下面那条 profile 行写进去。构建要求仓库本身已构建过一次（`pnpm run build:lib:host`），因为模块的两个类型依赖是通过它自己的 `tsconfig.json` paths 映射解析到 `vendor/cordis/lib/types` 和 `packages/subprocess/subprocess/lib/types` 的。除此之外不需要安装任何东西：产出的 `lib/index.js` 没有任何 import，而仓库的 `.gitignore` 本来就会忽略 `lib/`。
+本文件旁边的 `install.sh` 会替你构建、刷新 `dsh-base` 里的快照并跑测试（`bash install.sh`）。`bash install.sh --wire --yes` 还会把下面那条 profile 行写进去，这一步只给官方 npm `dsh` 用；在本检出上不要加 `--wire`，以免 profile 再挂一份。构建要求仓库本身已构建过一次（`pnpm run build:lib:host`），因为模块的两个类型依赖是通过它自己的 `tsconfig.json` paths 映射解析到 `vendor/cordis/lib/types` 和 `packages/subprocess/subprocess/lib/types` 的。除此之外不需要安装任何东西：产出的 `lib/index.js` 没有任何 import，而仓库的 `.gitignore` 本来就会忽略 `lib/`。
 
 <a id="wire-it-into-a-profile"></a>
 ## 接入 profile
 
-在跑 Multica 任务的 profile 上追加一条 patch 行，即 `~/.dsh/profiles/multica/cordis.patch.yml`（写进 `~/.dsh/cordis.patch.yml` 则对本机所有 profile 生效）：
+这个 fork 已经在 `packages/bundle/base/cordis.patch.yml` 里插入了该插件。用本检出运行时，不要再往 `~/.dsh/profiles/multica/cordis.patch.yml` 追加第二行。下面的例子只给官方 npm `dsh`（或没有跑这个 fork 的机器）用；写到 `~/.dsh/profiles/multica/cordis.patch.yml`（写进 `~/.dsh/cordis.patch.yml` 则对本机所有 profile 生效）：
 
 ```yaml
 - insert:
@@ -101,7 +101,7 @@ npm test            # build, then node --test tests/
 - **转发名单写死在源码里。** `FORWARDED_ENV_NAMES` 只声明了 `MULTICA_TOKEN`，与 runner 当前注入的内容一致；要加第二个「像凭据」的变量是改一行加一个测试，在出现第二个使用者之前不存在配置面。
 - **harness 不负责启动的子进程够不到。** MCP stdio server 由 MCP SDK 自己启动、不走 seam，需要用它自己的 `mcp-client` 配置里的 `env` 字段；任何直接调用 `child_process` 的插件同理。
 - **就地装饰跟随的是 seam，不是某个实现。** 若上游重命名了 `spawn` 或 `spawnTerminal`，包装会失配、凭据会悄悄消失；`tests/child-env.test.mjs` 会让这种改动失败而不是放它过去，修法是重新指向那两个被捕获的方法。
-- **`lib/` 是构建产物。** 它被仓库 `.gitignore` 忽略，所以新克隆的检出必须先构建，profile 里的那一行才能加载到模块。
+- **`lib/` 是构建产物。** 它被仓库 `.gitignore` 忽略，所以对着官方 npm `dsh` 跑 `install.sh --wire` 仍然要先构建；这个 fork 提交在 `packages/bundle/base/plugins/` 里的快照不依赖它。
 - **验收需要 harness。** 两个真实进程用例在找不到已安装 harness 时会跳过，这让纯单元用例在任何地方都能跑，但把端到端断言留给装有 harness 的机器。
 
 <a id="dev-note"></a>
@@ -110,6 +110,6 @@ npm test            # build, then node --test tests/
 <details>
 <summary>维护者工作上下文 —— 点击展开</summary>
 
-2026-09-20 为 lechun fork 编写，用来取代「给已安装的 dsh-subprocess 打临时补丁 + 一个智能体环境变量」这两招。已在本次机器上对着已安装的 harness（`dsh 0.1.5-rc.2`、Node 22）验证，fork 检出为 `0.1.6-alpha.2`：对照组的 spawn 报告 `<unset>`，被装饰的 spawn 报告出凭据；Loader 从一个生成的 `cordis.yml` 挂载了两行，没有 unloaded 条目。`dsh --profile multica --patch <patch> --dump-config` 会把这条 insert 行排在 bundle 层之后。本模块刻意不做成 workspace 包：`packages/*/*` 成员是可发布的 release member，新增一个还会在每次合并上游时牵动 `docs/config-catalog.md`、`docs/module-graph.md`、`tsconfig.base.json` 和 `pnpm-lock.yaml`。
+2026-09-20 为 lechun fork 编写，用来取代「给已安装的 dsh-subprocess 打临时补丁 + 一个智能体环境变量」这两招。这个 fork 现在把构建产物的快照打进 `@deepseek-ai/dsh-base`，从本检出构建的 CLI、Web、桌面不必再写 profile 行；`install.sh --wire` 只留给官方 npm `dsh`。已在本次机器上对着已安装的 harness（`dsh 0.1.5-rc.2`、Node 22）验证，fork 检出为 `0.1.6-alpha.2`：对照组的 spawn 报告 `<unset>`，被装饰的 spawn 报告出凭据；Loader 从一个生成的 `cordis.yml` 挂载了两行，没有 unloaded 条目。`dsh --profile multica --patch <patch> --dump-config` 会把 profile 上的 insert 行排在 bundle 层之后。本模块刻意不做成 workspace 包：`packages/*/*` 成员是可发布的 release member，新增一个还会在每次合并上游时牵动 `docs/config-catalog.md`、`docs/module-graph.md`、`tsconfig.base.json` 和 `pnpm-lock.yaml`。
 
 </details>

@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Build the module and optionally wire it into a dsh profile.
+# Build the module, refresh the dsh-base snapshot, and optionally wire it into
+# a dsh profile.
 #
-#   bash install.sh                 # build + run the test suite
-#   bash install.sh --no-test       # build only
+#   bash install.sh                 # build + refresh snapshot + run the test suite
+#   bash install.sh --no-test       # build + refresh snapshot
 #   bash install.sh --wire          # build, then print the profile patch it would write
 #   bash install.sh --wire --yes    # build, then write the patch (backs the file up)
 #   bash install.sh --unwire --yes  # remove the row again
+#
+# This fork already ships the plugin in @deepseek-ai/dsh-base. --wire is only
+# for official npm dsh (or a machine not running this checkout). Do not --wire
+# on this checkout: that would add a second copy in the profile layer.
 #
 # DSH_HOME and DSH_PROFILE select the patch file (default: ~/.dsh/profiles/multica).
 # It never restarts anything: each dsh task starts a new harness process, so a
@@ -38,6 +43,16 @@ done
 if [ "$build" = true ]; then
   printf '==> building %s\n' "$here"
   node "$repo/node_modules/typescript/bin/tsc" -p "$here/tsconfig.json"
+  # 2026-09-20 coder(lq): keep the committed dsh-base snapshot in lockstep with lib/.
+  snapshot="$repo/packages/bundle/base/plugins/multica-subprocess-env.js"
+  mkdir -p "$(dirname "$snapshot")"
+  node - "$entry" "$snapshot" <<'NODE'
+const fs = require('node:fs')
+const [src, dest] = process.argv.slice(2)
+const text = fs.readFileSync(src, 'utf8').replace(/\n\/\/# sourceMappingURL=.*\n?$/u, '\n')
+fs.writeFileSync(dest, text)
+NODE
+  printf '==> refreshed snapshot %s\n' "$snapshot"
 fi
 [ -f "$entry" ] || die "build produced no $entry"
 

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write integrations/multica-subprocess-env/README.md
-README.md: 2c9a0d88ed2576be6f0bae36bd8470357a358f76
-README.zh.md: 492e3e6c8ea3eeda9b0dc77353cca353a1f84323
+README.md: c561e6bb656f642a710049a72c4c591540b24570
+README.zh.md: b66f4dd4facda239fb0df2c5b0215ec2725ea613
