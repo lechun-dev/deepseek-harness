@@ -77,6 +77,21 @@ jobs:
       - name: Package unsigned desktop target
         run: pnpm --filter @deepseek-ai/dsh-desktop run ${{ matrix.package-script }}
 
+      - name: Keep macOS installer artifacts only
+        if: runner.os == 'macOS'
+        run: |
+          artifact_dir="apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts"
+          find "$artifact_dir" -type f ! -name '*.dmg' -delete
+          find "$artifact_dir" -maxdepth 1 -type f -print
+
+      - name: Keep Windows installer artifacts only
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifactDir = "apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts"
+          Get-ChildItem -Path $artifactDir -File | Where-Object { $_.Extension -ine '.exe' } | Remove-Item -Force
+          Get-ChildItem -Path $artifactDir -File | ForEach-Object { $_.FullName }
+
       - name: Upload unsigned artifacts
         uses: actions/upload-artifact@v4
         with:
