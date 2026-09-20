@@ -1,6 +1,7 @@
 import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { IpcMainInvokeEvent } from 'electron'
+import { protocol, type IpcMainInvokeEvent } from 'electron'
+import { serveWebDocument } from '../src/web-document.ts'
 import { join } from 'node:path'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -690,6 +691,29 @@ describe('desktop main startup', () => {
     window.webContents.emit('will-navigate', internal, 'dsh-app://app/session/task-1')
     expect(internal.preventDefault).not.toHaveBeenCalled()
     expect(harness.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('serves packaged shell overlay pages and keeps other custom-protocol hosts closed', async () => {
+    // 2026-09-20 coder(lq): production protocol.handle previously 404ed dsh-app://shell/*, which white-screens the update overlay.
+    await readyForUpdate()
+    const handler = vi.mocked(protocol.handle).mock.calls[0]![1] as (request: Request) => Promise<Response> | Response
+    const shellRoot = join('desktop-test-app', 'renderer')
+    const frontendRoot = join('desktop-test-app', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
+
+    const mandatory = new Request('dsh-app://shell/mandatory-update.html')
+    await handler(mandatory)
+    expect(serveWebDocument).toHaveBeenCalledWith(mandatory, shellRoot)
+
+    const dialog = new Request('dsh-app://shell/update-dialog.html')
+    await handler(dialog)
+    expect(serveWebDocument).toHaveBeenCalledWith(dialog, shellRoot)
+
+    const appIndex = new Request('dsh-app://app/')
+    await handler(appIndex)
+    expect(serveWebDocument).toHaveBeenCalledWith(appIndex, frontendRoot)
+
+    const unknown = await handler(new Request('dsh-app://other/secret.html'))
+    expect(unknown.status).toBe(404)
   })
 
   async function readyForUpdate() {

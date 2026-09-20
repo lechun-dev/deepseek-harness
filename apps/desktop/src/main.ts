@@ -407,6 +407,10 @@ async function main(): Promise<void> {
       }
       return forwardWebRequest(request, hostUrl, hostCookie)
     }
+    // 2026-09-20 coder(lq): overlay pages load dsh-app://shell/* from packaged renderer/; a 404 empty overlay white-screens the Mac window.
+    if (url.hostname === 'shell') {
+      return serveWebDocument(request, join(app.getAppPath(), 'renderer'))
+    }
     return Promise.resolve(new Response(null, { status: 404 }))
   })
 
