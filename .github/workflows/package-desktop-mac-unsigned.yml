@@ -1,6 +1,6 @@
-name: Package unsigned macOS desktop
+name: Package unsigned desktop
 
-# 2026-09-19 coder(lq): fork-friendly unsigned Mac desktop package without Apple Developer ID.
+# 2026-09-20 coder(lq): fork-friendly unsigned desktop packages without signing credentials.
 on:
   workflow_dispatch:
 
@@ -12,10 +12,27 @@ env:
   DSH_TELEMETRY_DISABLED: '1'
 
 jobs:
-  package-mac-arm64-unsigned:
-    name: unsigned mac-arm64
-    runs-on: macos-14
+  package-unsigned:
+    name: unsigned ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: mac-arm64
+            runner: macos-latest
+            package-script: package:mac:arm64:unsigned
+            artifact-name: dsh-desktop-mac-arm64-unsigned
+          - target: mac-x64
+            runner: macos-15-intel
+            package-script: package:mac:x64:unsigned
+            artifact-name: dsh-desktop-mac-x64-unsigned
+          - target: win-x64
+            runner: windows-2025
+            package-script: package:win:x64:unsigned
+            artifact-name: dsh-desktop-win-x64-unsigned
+
     steps:
       - uses: actions/checkout@v6
         with:
@@ -31,6 +48,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Write unsigned macOS packaging env
+        if: runner.os == 'macOS'
         run: |
           # 2026-09-20 coder(lq): keep test auth, but do not poll official harness-test (401 + Feishu overlay white-screens unsigned Mac builds).
           cat > apps/desktop/.env.macos <<'EOF'
@@ -45,15 +63,24 @@ jobs:
           CSC_KEY_PASSWORD=
           EOF
 
-      - name: Package unsigned macOS arm64
-        run: pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:unsigned
+      - name: Write unsigned Windows packaging env
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @'
+          DSH_DESKTOP_APP_ID=com.deepseek.harness
+          DSH_DESKTOP_AUTO_UPDATE_ENV=test
+          DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=https://example.invalid
+          DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
+          '@ | Set-Content -Path apps/desktop/.env.windows -Encoding utf8NoBOM
+
+      - name: Package unsigned desktop target
+        run: pnpm --filter @deepseek-ai/dsh-desktop run ${{ matrix.package-script }}
 
       - name: Upload unsigned artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dsh-desktop-mac-arm64-unsigned
+          name: ${{ matrix.artifact-name }}
           if-no-files-found: error
-          path: |
-            apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg
-            apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.zip
+          path: apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*
           retention-days: 14
