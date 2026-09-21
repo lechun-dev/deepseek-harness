@@ -1,8 +1,9 @@
 import { WINDOWS_TITLEBAR_HEIGHT } from './windows-layout.ts'
 /** Electron shell: desktop project ownership, custom protocol, windows, and lifecycle. */
 
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   app,
@@ -39,6 +40,15 @@ import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
+import {
+  installCliLauncher,
+  readCliLauncher,
+  removeCliLauncher,
+  systemCliLauncherOperations,
+  type CliInstallResult,
+  type CliLauncherEnvironment,
+  type CliRemoveResult,
+} from './cli-launcher.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
@@ -602,18 +612,113 @@ async function main(): Promise<void> {
   const hideCommands: MenuItemConstructorOptions[] = darwin
     ? [{ role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }]
     : []
+  /** Where this application's machine-wide `dsh` launcher lives; absent outside a packaged app. */
+  const commandLineToolEnvironment = (): CliLauncherEnvironment | undefined => {
+    if (!app.isPackaged) return undefined
+    return {
+      version: app.getVersion(),
+      executable: process.execPath,
+      cliEntry: join(app.getAppPath(), 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      pathEntries: (process.env.PATH ?? '').split(delimiter),
+      stateFile: join(app.getPath('userData'), 'cli-launcher.json'),
+    }
+  }
+  const commandLinePromptMarker = (): string => join(app.getPath('userData'), 'cli-launcher-prompted')
+
+  /** What the launcher replaced, when the caller should be told about it. */
+  const commandLinePreservedDetail = (result: CliInstallResult | CliRemoveResult): string => {
+    if (result.status !== 'installed' || result.replaced === undefined) return ''
+    const text = currentDesktopLocale().messages
+    return result.replaced.kind === 'file'
+      ? formatDesktopMessage(text.commandLinePreservedFile, { backup: result.replaced.backup })
+      : formatDesktopMessage(text.commandLinePreservedLink, { target: result.replaced.target })
+  }
+
+  const reportCommandLineResult = async (result: CliInstallResult | CliRemoveResult): Promise<void> => {
+    const text = currentDesktopLocale().messages
+    if (result.status === 'unchanged') return
+    if (result.status === 'installed') {
+      await ordinaryMessageBox({ type: 'info', title: text.commandLineInstalledTitle,
+        message: formatDesktopMessage(text.commandLineInstalled, { path: result.path, version: result.version }),
+        detail: commandLinePreservedDetail(result) })
+      return
+    }
+    if (result.status === 'removed') {
+      await ordinaryMessageBox({ type: 'info', title: text.commandLineRemovedTitle,
+        message: formatDesktopMessage(text.commandLineRemoved, { path: result.path }),
+        detail: result.restored === undefined ? '' : text.commandLineRestored })
+      return
+    }
+    if (result.status === 'absent') return
+    await ordinaryMessageBox({ type: 'error', title: text.commandLineInstallFailedTitle,
+      message: result.status === 'no-directory'
+        ? text.commandLineNoDirectory
+        : formatDesktopMessage(text.commandLineUnavailable, { path: result.path, version: app.getVersion() }) })
+  }
+
+  /**
+   * Offer, install, or remove the machine-wide `dsh` launcher. The first launch
+   * asks once; the application menu repeats the offer and undoes it.
+   * @param manual - Whether the user chose the menu command rather than first launch.
+   */
+  const manageCommandLineTool = async (manual: boolean): Promise<void> => {
+    const environment = commandLineToolEnvironment()
+    if (environment === undefined) return
+    const operations = systemCliLauncherOperations()
+    const text = currentDesktopLocale().messages
+    const installed = readCliLauncher(environment, operations)
+    if (installed !== undefined) {
+      if (!manual) return
+      const answer = await ordinaryMessageBox({ type: 'question', title: text.commandLineTitle,
+        message: formatDesktopMessage(text.commandLineInstalled, { path: installed.path, version: installed.version }),
+        buttons: [text.commandLineRemoveMenu, text.later], defaultId: 1, cancelId: 1 })
+      if (answer.response !== 0) return
+      await reportCommandLineResult(removeCliLauncher(environment, operations))
+      applyApplicationMenu()
+      return
+    }
+    if (!manual) {
+      if (existsSync(commandLinePromptMarker())) return
+      await writeFile(commandLinePromptMarker(), `${app.getVersion()}\n`)
+        .catch((error: unknown) => { console.error(error) })
+    }
+    const answer = await ordinaryMessageBox({ type: 'question', title: text.commandLineTitle,
+      message: text.commandLineOffer, detail: text.commandLineOfferDetail,
+      buttons: [text.commandLineInstall, text.later], defaultId: 0, cancelId: 1 })
+    if (answer.response !== 0) return
+    try {
+      await reportCommandLineResult(await installCliLauncher(environment, operations))
+    } catch (error) {
+      await ordinaryMessageBox({ type: 'error', title: text.commandLineInstallFailedTitle, message: desktopErrorState(error).message })
+    }
+    applyApplicationMenu()
+  }
+
+  const commandLineMenuLabel = (): string => {
+    const environment = commandLineToolEnvironment()
+    const text = currentDesktopLocale().messages
+    if (environment === undefined) return text.commandLineMenu
+    return readCliLauncher(environment, systemCliLauncherOperations()) === undefined
+      ? text.commandLineMenu
+      : text.commandLineRemoveMenu
+  }
+
   const applicationItems = (): MenuItemConstructorOptions[] => [
     { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    { label: commandLineMenuLabel(), click: () => { void manageCommandLineTool(true) } },
     { type: 'separator' },
     ...hideCommands,
     { role: 'quit', ...(process.platform === 'win32' ? { label: currentDesktopLocale().messages.exitApplication } : {}) },
   ]
-  Menu.setApplicationMenu(process.platform === 'win32' ? null : Menu.buildFromTemplate([{
-    label: darwin ? app.name : currentDesktopLocale().messages.application,
-    submenu: applicationItems(),
-  }, ...platformMenus]))
+  const applyApplicationMenu = (): void => {
+    Menu.setApplicationMenu(process.platform === 'win32' ? null : Menu.buildFromTemplate([{
+      label: darwin ? app.name : currentDesktopLocale().messages.application,
+      submenu: applicationItems(),
+    }, ...platformMenus]))
+  }
+  applyApplicationMenu()
 
   if (process.platform === 'win32') {
     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
@@ -778,6 +883,9 @@ async function main(): Promise<void> {
     window.webContents.openDevTools({ mode: 'detach' })
   }
   publishUpdate(updateState)
+  // The launcher offer follows a usable window: it is the first launch the user
+  // sees, and its dialogs parent to that window.
+  void manageCommandLineTool(false).catch((error: unknown) => { console.error(error) })
 }
 
 const ownsDesktopInstance = claimDesktopSingleInstance(app, () => { focusPrimaryWindow() })

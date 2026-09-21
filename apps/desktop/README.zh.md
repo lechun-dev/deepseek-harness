@@ -4,6 +4,8 @@
 
 桌面应用是完整 dsh Web 应用外的一层 Electron 壳。Electron RunAsNode 子进程启动共享 profile runner，Electron 立即从 `dsh-app://app/` 加载打包内的 Web 入口。共享加载页等待 Host 启动注入，然后在同一文档中启动客户端。Electron 将应用 HTTP 请求转发给已认证的 Web Host；WebSocket 流连接到该 Host，仅为归属的应用窗口附加凭据。Node IPC 承载启动注入、就绪与关闭。桌面端与 Web 默认使用同一个端口 `3080`，可用 `webserver.config.port` patch 覆盖：同一个 Harness home 只服务一个 Web 运行时，因此子进程会采用另一个形态已在该 home 发布的服务，而不是再绑一个端口；桌面窗口与正在运行的 `dsh web` 共用同一份会话与流。当该端口已被占用、且本 home 没有可采用的已发布服务时，子进程改为绑定操作系统分配的 loopback 端口，而不是启动失败。
 
+打包版首次启动会询问一次是否安装本机的 `dsh` 命令。它写入 `PATH` 上的启动器（优先 `/opt/homebrew/bin`，其次 `/usr/local/bin`；该目录属于管理员时使用系统授权弹窗）以 Node 模式通过应用自身的 Electron 可执行文件运行内置运行时，这正是让只读 PATH 的使用方（如 MissionOS）与服务桌面窗口的运行时保持一致的方式。应用菜单可重复该操作并移除启动器，同时恢复它替换掉的 `dsh`：记录过的软链目标，或被移动到 `<path>.<version>.bak` 的普通文件。启动器记录的是绝对应用路径，因此移动应用后需要从菜单重新安装。
+
 应用菜单第一项“**关于 DeepSeek Harness**”打开 Electron 原生关于面板，展示应用图标、产品名称和当前安装的发布版本。菜单文案跟随桌面壳的语言。macOS 从应用包读取图标，因此未打包的开发启动会显示 Electron 图标；Windows 使用随包分发的 PNG。
 
 Desktop 的本地原生目录流程打开绑定应用窗口的 Electron 文件夹对话框，并先恢复、显示和聚焦该窗口。并发请求共用一个对话框；取消不返回路径，失败后可以重试。普通 Web 使用 Host 选择器。浏览模式列出 Host 目录。Linux 缺少 zenity 或 kdialog 时，自动选择使用浏览模式，不使用 Electron 对话框。
