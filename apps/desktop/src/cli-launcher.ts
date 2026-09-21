@@ -3,21 +3,29 @@
  * command, so a surface that only reads PATH — MissionOS, a terminal — uses the
  * same installation the desktop window serves.
  *
- * The launcher is a shell wrapper, because the bundled runtime lives inside
- * `app.asar` and only the application's own Electron binary reads that archive.
- * Installation is explicit and reversible: an occupied path is preserved and a
- * state file records what to restore.
+ * The launcher is a wrapper — a POSIX shell script on macOS, a `.cmd` on
+ * Windows — because the bundled runtime lives inside `app.asar` and only the
+ * application's own Electron binary reads that archive. Installation is
+ * explicit and reversible: an occupied path is preserved and a state file
+ * records what to restore. Every candidate directory must be one the current
+ * user owns or may write; a system directory is never overwritten.
  * @module @deepseek-ai/dsh-desktop/cli-launcher
  */
 
 import { execFile } from 'node:child_process'
 import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 
-/** Directories preferred for the launcher, most preferred first. */
+/** macOS directories preferred for the launcher, most preferred first. */
 export const PREFERRED_LAUNCHER_DIRECTORIES = ['/opt/homebrew/bin', '/usr/local/bin'] as const
 
-/** File name of the installed launcher. */
+/** File name of the installed launcher on macOS and Linux. */
 export const CLI_LAUNCHER_NAME = 'dsh'
+
+/** Windows launcher file name, the only spelling its command lookup resolves. */
+export const CLI_LAUNCHER_WINDOWS_NAME = 'dsh.cmd'
+
+/** Windows user execution-alias directory, appended to a user PATH by default. */
+const WINDOWS_APPS_DIRECTORY = /\\Microsoft\\WindowsApps\\?$/iu
 
 /** One `dsh` that already occupied the chosen path. */
 export type CliLauncherReplaced =
@@ -38,6 +46,8 @@ export interface CliLauncherState {
 export interface CliLauncherEnvironment {
   /** Installed application version, which the bundled runtime also reports. */
   readonly version: string
+  /** Platform whose launcher spelling and installation rules apply. */
+  readonly platform: NodeJS.Platform
   /** Absolute application executable run in Electron Node mode. */
   readonly executable: string
   /** Absolute bundled `dsh` entry point inside the application. */
@@ -92,6 +102,11 @@ const LAUNCHER_PREAMBLE = `#!/bin/sh
 # Installed by DeepSeek Harness. Remove or reinstall it from the application menu.
 `
 
+/** Header comment of the installed Windows launcher. */
+const WINDOWS_LAUNCHER_PREAMBLE = `@echo off
+rem Installed by DeepSeek Harness. Remove or reinstall it from the application menu.
+`
+
 /** Marker that terminates the privileged heredoc. */
 const LAUNCHER_HEREDOC = 'DSH_LAUNCHER'
 
@@ -100,29 +115,69 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`
 }
 
+/** Quote one value for a Windows command line. */
+function windowsQuote(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`
+}
+
 /**
- * The launcher script that runs the bundled runtime under the application's own
+ * The launcher file name for one platform: Windows resolves a command only
+ * through a `PATHEXT` extension, so an extensionless file there is inert.
+ * @param platform - platform whose lookup rules apply.
+ * @returns the installed file name.
+ */
+export function cliLauncherName(platform: NodeJS.Platform): string {
+  return platform === 'win32' ? CLI_LAUNCHER_WINDOWS_NAME : CLI_LAUNCHER_NAME
+}
+
+/**
+ * The launcher that runs the bundled runtime under the application's own
  * Electron binary. `ELECTRON_RUN_AS_NODE` is what gives that binary plain
  * `node` semantics while still reading the `app.asar` archive.
- * @param environment - application paths.
- * @returns the complete shell script.
+ * @param environment - application platform and paths.
+ * @returns the complete launcher file contents.
  */
 export function cliLauncherScript(environment: CliLauncherEnvironment): string {
+  if (environment.platform === 'win32') {
+    return `${WINDOWS_LAUNCHER_PREAMBLE}set ELECTRON_RUN_AS_NODE=1\r
+${windowsQuote(environment.executable)} --expose-internals ${windowsQuote(environment.cliEntry)} %*\r
+`
+  }
   return `${LAUNCHER_PREAMBLE}ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(environment.executable)} --expose-internals ${shellQuote(environment.cliEntry)} "$@"
 `
 }
 
 /**
- * Directories the launcher may be written to, in order: the two conventional
- * locations first, then every other PATH entry this application can see, so an
- * installation still works where those directories are absent.
- * @param pathEntries - `PATH` entries visible to this application.
- * @returns absolute candidate directories without duplicates.
+ * Directories this platform prefers for a user-owned launcher: macOS keeps the
+ * two conventional locations, and Windows uses the user's execution-alias
+ * directory, which its own PATH already carries and no administrator needs to
+ * change.
+ * @param environment - platform and visible PATH entries.
+ * @returns preferred directories, most preferred first.
  */
-export function cliLauncherDirectories(pathEntries: readonly string[]): string[] {
+function preferredLauncherDirectories(environment: CliLauncherEnvironment): string[] {
+  if (environment.platform === 'darwin') return [...PREFERRED_LAUNCHER_DIRECTORIES]
+  if (environment.platform !== 'win32') return []
+  const alias = environment.pathEntries.find(entry => WINDOWS_APPS_DIRECTORY.test(entry))
+  return alias === undefined ? [] : [alias]
+}
+
+/**
+ * Directories the launcher may be written to, in order: the platform's
+ * preferred locations first, then every other PATH entry this application can
+ * see, so an installation still works where those directories are absent.
+ * @param environment - platform and visible PATH entries.
+ * @returns candidate directories without duplicates.
+ */
+export function cliLauncherDirectories(environment: CliLauncherEnvironment): string[] {
+  // Windows keeps the alias directory alone: the rest of its PATH holds system
+  // directories a user process must never install into.
+  const candidates = environment.platform === 'win32'
+    ? preferredLauncherDirectories(environment)
+    : [...preferredLauncherDirectories(environment), ...environment.pathEntries]
   const seen = new Set<string>()
   const ordered: string[] = []
-  for (const entry of [...PREFERRED_LAUNCHER_DIRECTORIES, ...pathEntries]) {
+  for (const entry of candidates) {
     if (entry === '' || seen.has(entry)) continue
     seen.add(entry)
     ordered.push(entry)
@@ -204,14 +259,18 @@ export async function installCliLauncher(
   environment: CliLauncherEnvironment,
   operations: CliLauncherOperations,
 ): Promise<CliInstallResult> {
-  const candidates = cliLauncherDirectories(environment.pathEntries)
+  const candidates = cliLauncherDirectories(environment)
     .filter(directory => operations.isDirectory(directory))
   const writable = candidates.find(directory => operations.isWritableDirectory(directory))
-  const directory = writable ?? candidates[0]
+  // Only macOS can turn an administrator-owned directory into an installation,
+  // through its own authorization prompt; the alias directory on Windows is
+  // user-owned, so anything else there is simply not a candidate.
+  const directory = writable ?? (environment.platform === 'darwin' ? candidates[0] : undefined)
   if (directory === undefined) return { status: 'no-directory' }
 
   const script = cliLauncherScript(environment)
-  const path = `${directory}/${CLI_LAUNCHER_NAME}`
+  const name = cliLauncherName(environment.platform)
+  const path = environment.platform === 'win32' ? `${directory}\\${name}` : `${directory}/${name}`
   if (operations.readFile(path) === script) {
     return { status: 'unchanged', path, version: environment.version }
   }

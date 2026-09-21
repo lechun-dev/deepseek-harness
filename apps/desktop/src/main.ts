@@ -617,8 +617,10 @@ async function main(): Promise<void> {
     if (!app.isPackaged) return undefined
     return {
       version: app.getVersion(),
+      platform: process.platform,
       executable: process.execPath,
       cliEntry: join(app.getAppPath(), 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      // `delimiter` is this platform's own PATH separator: ':' on macOS, ';' on Windows.
       pathEntries: (process.env.PATH ?? '').split(delimiter),
       stateFile: join(app.getPath('userData'), 'cli-launcher.json'),
     }

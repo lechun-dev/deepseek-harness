@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CLI_LAUNCHER_NAME,
+  cliLauncherName,
   cliLauncherDirectories,
   cliLauncherScript,
   installCliLauncher,
@@ -75,12 +76,29 @@ class FakeOperations implements CliLauncherOperations {
 function environment(overrides: Partial<CliLauncherEnvironment> = {}): CliLauncherEnvironment {
   return {
     version: '0.1.6-alpha.3',
+    platform: 'darwin',
     executable: '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
     cliEntry: '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
     pathEntries: ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'],
     stateFile: '/Users/tester/Library/Application Support/dsh-desktop/cli-launcher.json',
     ...overrides,
   }
+}
+
+/** A Windows machine, where the only usable directory is the user's alias folder. */
+function windowsEnvironment(overrides: Partial<CliLauncherEnvironment> = {}): CliLauncherEnvironment {
+  return environment({
+    platform: 'win32',
+    executable: 'C:\\Program Files\\DeepSeek Harness\\DeepSeek Harness.exe',
+    cliEntry: 'C:\\Program Files\\DeepSeek Harness\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
+    pathEntries: [
+      'C:\\Windows\\system32',
+      'C:\\Windows',
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
+    ],
+    stateFile: 'C:\\Users\\tester\\AppData\\Roaming\\dsh-desktop\\cli-launcher.json',
+    ...overrides,
+  })
 }
 
 function usable(): FakeOperations {
@@ -104,12 +122,60 @@ describe('cliLauncherScript', () => {
 
 describe('cliLauncherDirectories', () => {
   it('prefers the conventional directories, then PATH order, without duplicates', () => {
-    expect(cliLauncherDirectories(['/usr/bin', '/opt/homebrew/bin', '', '/custom/bin'])).toEqual([
+    expect(cliLauncherDirectories(environment({ pathEntries: ['/usr/bin', '/opt/homebrew/bin', '', '/custom/bin'] }))).toEqual([
       '/opt/homebrew/bin',
       '/usr/local/bin',
       '/usr/bin',
       '/custom/bin',
     ])
+  })
+
+  it('keeps only the user alias directory on Windows, never a system directory', () => {
+    expect(cliLauncherDirectories(windowsEnvironment())).toEqual([
+      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
+    ])
+  })
+
+  it('offers no Windows directory when the alias folder is not on PATH', () => {
+    expect(cliLauncherDirectories(windowsEnvironment({ pathEntries: ['C:\\Windows\\system32'] }))).toEqual([])
+  })
+})
+
+describe('Windows launcher', () => {
+  it('writes a .cmd that resolves through PATHEXT', () => {
+    const script = cliLauncherScript(windowsEnvironment())
+    expect(script.startsWith('@echo off')).toBe(true)
+    expect(script).toContain('set ELECTRON_RUN_AS_NODE=1')
+    expect(script).toContain('"C:\\Program Files\\DeepSeek Harness\\DeepSeek Harness.exe"')
+    expect(script).toContain(' --expose-internals ')
+    expect(script).toContain(' %*')
+    expect(cliLauncherName('win32')).toBe('dsh.cmd')
+  })
+
+  it('installs into the alias directory and never escalates', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    operations.directories.add(alias)
+    operations.directories.add('C:\\Windows\\system32')
+    operations.writable.add(alias)
+    const env = windowsEnvironment()
+
+    const result = await installCliLauncher(env, operations)
+    expect(result).toEqual({ status: 'installed', path: `${alias}\\dsh.cmd`, version: env.version })
+    expect(operations.privileged).toEqual([])
+    expect(operations.files.has('C:\\Windows\\system32\\dsh')).toBe(false)
+  })
+
+  it('reports no-directory instead of escalating when the alias directory is read-only', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    operations.directories.add(alias)
+    operations.directories.add('C:\\Windows\\system32')
+    operations.writable.add('C:\\Windows\\system32')
+
+    expect(await installCliLauncher(windowsEnvironment(), operations)).toEqual({ status: 'no-directory' })
+    expect(operations.privileged).toEqual([])
+    expect(operations.files.size).toBe(0)
   })
 })
 
