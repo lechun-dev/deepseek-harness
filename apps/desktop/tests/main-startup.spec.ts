@@ -9,7 +9,7 @@ import type { MenuItemConstructorOptions, MessageBoxOptions } from 'electron'
 import { DESKTOP_IPC, type DesktopUpdateState } from '../src/ipc.ts'
 import { MANDATORY_IPC } from '../src/mandatory-update-ipc.ts'
 import { DesktopHostUncleanExitError } from '../src/host-process.ts'
-import { en } from '../src/locale.ts'
+import { en, zh } from '../src/locale.ts'
 import { DesktopUpdatePreparationError } from '../src/update-error.ts'
 
 type InvokeEvent = { sender?: unknown; senderFrame: { url: string } }
@@ -122,6 +122,7 @@ const harness = await vi.hoisted(async () => {
     name: 'Desktop test',
     whenReady: () => Promise.resolve(),
     getLocale: (): string => 'en-US',
+    getPreferredSystemLanguages: (): string[] => [],
     getVersion: () => '1.0.0',
     getAppPath: () => 'desktop-test-app',
     getPath: (name: string) => join('desktop-test-user-data', name),
@@ -698,6 +699,16 @@ describe('desktop main startup', () => {
     window.webContents.emit('will-navigate', internal, 'dsh-app://app/session/task-1')
     expect(internal.preventDefault).not.toHaveBeenCalled()
     expect(harness.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('speaks the operating system language when the bundle declares no macOS localization', async () => {
+    // A packaged bundle without CFBundleLocalizations reports "en" from getLocale()
+    // on a Chinese Mac; the preference list is where the user's choice survives.
+    vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue(['zh-Hans-CN', 'en-CN'])
+    await readyForUpdate()
+    const labels = applicationMenuItems().map(item => item.label ?? item.type)
+    expect(labels).toContain(zh.checkUpdatesMenu)
+    expect(labels).not.toContain(en.checkUpdatesMenu)
   })
 
   it('opens the shared Web interface in the default browser from the application menu', async () => {

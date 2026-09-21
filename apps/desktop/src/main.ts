@@ -25,7 +25,7 @@ import { DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { DesktopBackendController } from './backend-controller.ts'
 import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
-import { formatDesktopMessage, resolveDesktopLocale } from './locale.ts'
+import { formatDesktopMessage, resolveDesktopLanguage, resolveDesktopLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
 import { DesktopUpdateCoordinator } from './update-coordinator.ts'
 import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
@@ -56,7 +56,7 @@ let shuttingDown = false
 let windowsLanguage: string | undefined
 
 function currentDesktopLocale(): ReturnType<typeof resolveDesktopLocale> {
-  return resolveDesktopLocale(windowsLanguage ?? app.getLocale())
+  return resolveDesktopLocale(resolveDesktopLanguage(windowsLanguage, app.getPreferredSystemLanguages(), app.getLocale()))
 }
 const recovery = new DesktopFatalRecovery({
   messages: () => currentDesktopLocale().messages,

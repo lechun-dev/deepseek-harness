@@ -230,6 +230,27 @@ export function resolveDesktopLocale(locale: string): DesktopLocale {
     : { id: 'en', messages: en }
 }
 
+/**
+ * Select the language the Desktop shell speaks.
+ *
+ * The packaged bundle declares no macOS localizations, so Chromium reports the
+ * development region ("en") from `app.getLocale()` on a Chinese Mac. The
+ * operating system's preference list is the value that carries the user's own
+ * choice, so it outranks that fallback; a language the renderer already
+ * reported, which is how Windows follows the page, outranks both.
+ * @param rendererLanguage - Language reported by the renderer, when it has one.
+ * @param preferredSystemLanguages - `app.getPreferredSystemLanguages()`, in preference order.
+ * @param applicationLocale - `app.getLocale()`, the application-level fallback.
+ * @returns one language tag for {@link resolveDesktopLocale}.
+ */
+export function resolveDesktopLanguage(
+  rendererLanguage: string | undefined,
+  preferredSystemLanguages: readonly string[],
+  applicationLocale: string,
+): string {
+  return rendererLanguage ?? preferredSystemLanguages.find(language => language !== '') ?? applicationLocale
+}
+
 /** Replace named placeholders in one locale-owned message. */
 export function formatDesktopMessage(
   message: string,
