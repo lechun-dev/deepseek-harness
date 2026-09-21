@@ -102,6 +102,9 @@ export const en = {
   commandLineRemovedTitle: 'Command line tool removed',
   commandLineRemoved: 'Removed {path}.',
   commandLineRestored: 'The previous dsh was restored.',
+  webInterfaceMenu: 'Open Web Interface in Browser',
+  webInterfaceTitle: 'Web Interface',
+  webInterfaceUnavailable: 'The Web interface is not ready yet. Try again once the workspace has loaded.',
 } as const
 
 /** Every Desktop locale supplies the complete English key set. */
@@ -209,6 +212,9 @@ export const zh = {
   commandLineRemovedTitle: '命令行工具已移除',
   commandLineRemoved: '已移除 {path}。',
   commandLineRestored: '原来的 dsh 已恢复。',
+  webInterfaceMenu: '在浏览器中打开 Web 界面',
+  webInterfaceTitle: 'Web 界面',
+  webInterfaceUnavailable: 'Web 界面尚未就绪，请等待工作区加载完成后再试。',
 } as const satisfies DesktopMessages
 
 /** Locale payload exposed to the Desktop-owned renderer. */

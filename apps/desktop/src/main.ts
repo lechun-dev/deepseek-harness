@@ -703,10 +703,25 @@ async function main(): Promise<void> {
       : text.commandLineRemoveMenu
   }
 
+  /**
+   * Open this home's Web interface in the user's own browser. The browser needs
+   * the authenticated URL once, because only the exchange it performs stores the
+   * cookie that the clean loopback address then accepts.
+   */
+  const openWebInterface = async (): Promise<void> => {
+    const text = currentDesktopLocale().messages
+    if (hostUrl === undefined) {
+      await ordinaryMessageBox({ type: 'info', title: text.webInterfaceTitle, message: text.webInterfaceUnavailable })
+      return
+    }
+    await shell.openExternal(hostUrl)
+  }
+
   const applicationItems = (): MenuItemConstructorOptions[] => [
     { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    { label: currentDesktopLocale().messages.webInterfaceMenu, click: () => { void openWebInterface() } },
     { label: commandLineMenuLabel(), click: () => { void manageCommandLineTool(true) } },
     { type: 'separator' },
     ...hideCommands,
