@@ -28,6 +28,8 @@ class FakeOperations implements CliLauncherOperations {
   readonly renames: [string, string][] = []
   readonly calls: string[] = []
   report: string | undefined = '0.1.6-alpha.3'
+  probe: string | undefined
+  readonly copies: [string, string][] = []
   privilegedFailure: Error | undefined
 
   exists(path: string): boolean { return this.files.has(path) || this.links.has(path) }
@@ -70,7 +72,14 @@ class FakeOperations implements CliLauncherOperations {
     this.privileged.push(script)
   }
 
+  copyFile(from: string, to: string): void {
+    this.copies.push([from, to])
+    this.files.set(to, this.files.get(from) ?? '')
+  }
+
   async installedVersion(): Promise<string | undefined> { return this.report }
+
+  async probeMultica(): Promise<string | undefined> { return this.probe }
 }
 
 function environment(overrides: Partial<CliLauncherEnvironment> = {}): CliLauncherEnvironment {
@@ -141,6 +150,29 @@ describe('cliLauncherDirectories', () => {
   })
 })
 
+describe('installed launcher self-checks', () => {
+  it('reports the Multica bridge answer the launcher returned', async () => {
+    const operations = usable()
+    operations.probe = 'dsh'
+    const result = await installCliLauncher(environment(), operations)
+    expect(result.status === 'installed' && result.probe).toBe('dsh')
+  })
+
+  it('reports nothing when the bridge profile does not answer', async () => {
+    const operations = usable()
+    const result = await installCliLauncher(environment(), operations)
+    expect(result.status === 'installed' && result.probe).toBeUndefined()
+  })
+
+  it('reports an earlier PATH entry that keeps precedence', async () => {
+    const operations = usable()
+    const env = environment({ pathEntries: ['/usr/bin', '/opt/homebrew/bin'] })
+    operations.files.set('/usr/bin/dsh', '#!/bin/sh\necho old\n')
+    const result = await installCliLauncher(env, operations)
+    expect(result.status === 'installed' && result.shadowedBy).toBe('/usr/bin/dsh')
+  })
+})
+
 describe('Windows launcher', () => {
   it('writes a .cmd that resolves through PATHEXT', () => {
     const script = cliLauncherScript(windowsEnvironment())
@@ -164,6 +196,24 @@ describe('Windows launcher', () => {
     expect(result).toEqual({ status: 'installed', path: `${alias}\\dsh.cmd`, version: env.version })
     expect(operations.privileged).toEqual([])
     expect(operations.files.has('C:\\Windows\\system32\\dsh')).toBe(false)
+  })
+
+
+  it('installs the shipped executable plus its target file instead of a .cmd', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    operations.directories.add(alias)
+    operations.writable.add(alias)
+    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
+    operations.files.set(shim, 'MZ...')
+    operations.probe = 'dsh'
+    const env = windowsEnvironment({ shimSource: shim })
+
+    const result = await installCliLauncher(env, operations)
+    expect(result.status).toBe('installed')
+    expect(operations.copies).toEqual([[shim, alias + '\\dsh.exe']])
+    expect(operations.files.get(alias + '\\dsh-shim.json')).toContain('cliEntry')
+    expect(result.status === 'installed' && result.probe).toBe('dsh')
   })
 
   it('reports no-directory instead of escalating when the alias directory is read-only', async () => {

@@ -623,17 +623,24 @@ async function main(): Promise<void> {
       // `delimiter` is this platform's own PATH separator: ':' on macOS, ';' on Windows.
       pathEntries: (process.env.PATH ?? '').split(delimiter),
       stateFile: join(app.getPath('userData'), 'cli-launcher.json'),
+      // Windows needs a real executable: `CreateProcess` cannot run the `.cmd` a shell accepts.
+      ...(process.platform === 'win32'
+        ? { shimSource: join(process.resourcesPath, 'cli-shim', 'dsh.exe') }
+        : {}),
     }
   }
   const commandLinePromptMarker = (): string => join(app.getPath('userData'), 'cli-launcher-prompted')
 
-  /** What the launcher replaced, when the caller should be told about it. */
-  const commandLinePreservedDetail = (result: CliInstallResult | CliRemoveResult): string => {
-    if (result.status !== 'installed' || result.replaced === undefined) return ''
+  /** Extra lines the install result carries: what it replaced, what shadows it, and whether MissionOS can register it. */
+  const commandLineInstallDetail = (result: CliInstallResult): string => {
+    if (result.status !== 'installed') return ''
     const text = currentDesktopLocale().messages
-    return result.replaced.kind === 'file'
-      ? formatDesktopMessage(text.commandLinePreservedFile, { backup: result.replaced.backup })
-      : formatDesktopMessage(text.commandLinePreservedLink, { target: result.replaced.target })
+    const lines: string[] = []
+    if (result.replaced?.kind === 'file') lines.push(formatDesktopMessage(text.commandLinePreservedFile, { backup: result.replaced.backup }))
+    if (result.replaced?.kind === 'symlink') lines.push(formatDesktopMessage(text.commandLinePreservedLink, { target: result.replaced.target }))
+    if (result.shadowedBy !== undefined) lines.push(formatDesktopMessage(text.commandLineShadowed, { path: result.shadowedBy }))
+    lines.push(result.probe === undefined ? text.commandLineProbeMissing : text.commandLineProbeReady)
+    return lines.join('\n\n')
   }
 
   const reportCommandLineResult = async (result: CliInstallResult | CliRemoveResult): Promise<void> => {
@@ -642,7 +649,7 @@ async function main(): Promise<void> {
     if (result.status === 'installed') {
       await ordinaryMessageBox({ type: 'info', title: text.commandLineInstalledTitle,
         message: formatDesktopMessage(text.commandLineInstalled, { path: result.path, version: result.version }),
-        detail: commandLinePreservedDetail(result) })
+        detail: commandLineInstallDetail(result) })
       return
     }
     if (result.status === 'removed') {
@@ -679,19 +686,30 @@ async function main(): Promise<void> {
       applyApplicationMenu()
       return
     }
-    if (!manual) {
-      if (existsSync(commandLinePromptMarker())) return
-      await writeFile(commandLinePromptMarker(), `${app.getVersion()}\n`)
-        .catch((error: unknown) => { console.error(error) })
-    }
+    if (!manual && existsSync(commandLinePromptMarker())) return
     const answer = await ordinaryMessageBox({ type: 'question', title: text.commandLineTitle,
       message: text.commandLineOffer, detail: text.commandLineOfferDetail,
       buttons: [text.commandLineInstall, text.later], defaultId: 0, cancelId: 1 })
-    if (answer.response !== 0) return
+    if (answer.response !== 0) {
+      // Only a decline or a completed attempt stops the first launch from asking
+      // again, so a failed installation is retried on the next launch.
+      if (!manual) {
+        await writeFile(commandLinePromptMarker(), `${app.getVersion()}\n`)
+          .catch((error: unknown) => { console.error(error) })
+      }
+      return
+    }
+    let installedNow = false
     try {
-      await reportCommandLineResult(await installCliLauncher(environment, operations))
+      const result = await installCliLauncher(environment, operations)
+      installedNow = result.status === 'installed' || result.status === 'unchanged'
+      await reportCommandLineResult(result)
     } catch (error) {
       await ordinaryMessageBox({ type: 'error', title: text.commandLineInstallFailedTitle, message: desktopErrorState(error).message })
+    }
+    if (!manual && installedNow) {
+      await writeFile(commandLinePromptMarker(), `${app.getVersion()}\n`)
+        .catch((error: unknown) => { console.error(error) })
     }
     applyApplicationMenu()
   }
@@ -900,9 +918,14 @@ async function main(): Promise<void> {
     window.webContents.openDevTools({ mode: 'detach' })
   }
   publishUpdate(updateState)
-  // The launcher offer follows a usable window: it is the first launch the user
-  // sees, and its dialogs parent to that window.
-  void manageCommandLineTool(false).catch((error: unknown) => { console.error(error) })
+  // The command line offer waits for the user's attention: startup already owns
+  // dialogs for update checks, and this question is not worth racing them.
+  let commandLineOffered = false
+  window?.on('focus', () => {
+    if (commandLineOffered) return
+    commandLineOffered = true
+    void manageCommandLineTool(false).catch((error: unknown) => { console.error(error) })
+  })
 }
 
 const ownsDesktopInstance = claimDesktopSingleInstance(app, () => { focusPrimaryWindow() })

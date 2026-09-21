@@ -120,6 +120,9 @@ export function createElectronBuilderConfig(
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
+      // The Windows launcher the application installs on PATH: CreateProcess
+      // cannot run a `.cmd`, so this build carries a real executable.
+      ...(resolvedPlatform === 'win32' ? [{ from: join(buildPaths.root, 'cli-shim', 'dsh.exe'), to: 'cli-shim/dsh.exe' }] : []),
     ],
     mac: {
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),

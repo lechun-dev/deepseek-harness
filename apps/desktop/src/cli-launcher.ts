@@ -13,7 +13,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { accessSync, constants, existsSync, lstatSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, copyFileSync, existsSync, lstatSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 
 /** macOS directories preferred for the launcher, most preferred first. */
 export const PREFERRED_LAUNCHER_DIRECTORIES = ['/opt/homebrew/bin', '/usr/local/bin'] as const
@@ -23,6 +23,12 @@ export const CLI_LAUNCHER_NAME = 'dsh'
 
 /** Windows launcher file name, the only spelling its command lookup resolves. */
 export const CLI_LAUNCHER_WINDOWS_NAME = 'dsh.cmd'
+
+/** Windows launcher executable name, which `CreateProcess` can run directly. */
+export const CLI_LAUNCHER_WINDOWS_EXECUTABLE = 'dsh.exe'
+
+/** Sibling file the Windows launcher executable reads for its target. */
+export const CLI_LAUNCHER_SHIM_CONFIG = 'dsh-shim.json'
 
 /** Windows user execution-alias directory, appended to a user PATH by default. */
 const WINDOWS_APPS_DIRECTORY = /\\Microsoft\\WindowsApps\\?$/iu
@@ -38,6 +44,8 @@ export interface CliLauncherState {
   readonly version: string
   /** Absolute launcher path. */
   readonly path: string
+  /** Sibling file a Windows launcher reads for its target, when one was written. */
+  readonly configPath?: string
   /** What the launcher replaced, when the path was occupied. */
   readonly replaced?: CliLauncherReplaced
 }
@@ -56,6 +64,13 @@ export interface CliLauncherEnvironment {
   readonly pathEntries: readonly string[]
   /** Absolute state file owned by this application. */
   readonly stateFile: string
+  /**
+   * Absolute Windows launcher executable carried by this build. Windows cannot
+   * execute a `.cmd` through `CreateProcess`, so a PATH consumer that is not a
+   * shell needs a real executable; without one the installer writes `.cmd` and
+   * reports that a shell is required.
+   */
+  readonly shimSource?: string
 }
 
 /** Filesystem and process operations the installer needs; replaced in tests. */
@@ -74,6 +89,8 @@ export interface CliLauncherOperations {
   writeFile(path: string, contents: string, mode: number): void
   /** Create a symlink, replacing any existing entry. */
   writeLink(path: string, target: string): void
+  /** Copy one file, replacing the destination. */
+  copyFile(from: string, to: string): void
   /** Move an entry, replacing the destination. */
   rename(from: string, to: string): void
   /** Remove one entry. */
@@ -82,11 +99,22 @@ export interface CliLauncherOperations {
   runPrivileged(script: string): Promise<void>
   /** Run the installed launcher and return the version it reports. */
   installedVersion(path: string): Promise<string | undefined>
+  /** Ask the installed launcher for the Multica bridge's probe answer. */
+  probeMultica(path: string): Promise<string | undefined>
 }
 
 /** Outcome of an installation attempt. */
 export type CliInstallResult =
-  | { readonly status: 'installed'; readonly path: string; readonly version: string; readonly replaced?: CliLauncherReplaced }
+  | {
+    readonly status: 'installed'
+    readonly path: string
+    readonly version: string
+    readonly replaced?: CliLauncherReplaced
+    /** An earlier PATH entry that still answers for the same command name. */
+    readonly shadowedBy?: string
+    /** The Multica bridge's probe answer, when the launcher reported one. */
+    readonly probe?: string
+  }
   | { readonly status: 'unchanged'; readonly path: string; readonly version: string }
   | { readonly status: 'no-directory' }
   | { readonly status: 'unavailable'; readonly path: string }
@@ -204,15 +232,29 @@ export function readCliLauncher(environment: CliLauncherEnvironment, operations:
   if (typeof value !== 'object' || value === null) return undefined
   const candidate = value as Record<string, unknown>
   if (typeof candidate.version !== 'string' || typeof candidate.path !== 'string') return undefined
+  const configPath = typeof candidate.configPath === 'string' ? candidate.configPath : undefined
   const replaced = candidate.replaced
-  if (replaced === undefined) return { version: candidate.version, path: candidate.path }
+  const state: CliLauncherState = {
+    version: candidate.version,
+    path: candidate.path,
+    ...(configPath === undefined ? {} : { configPath }),
+  }
+  if (replaced === undefined) return state
   if (typeof replaced !== 'object' || replaced === null) return undefined
   const entry = replaced as Record<string, unknown>
   if (entry.kind === 'symlink' && typeof entry.target === 'string') {
-    return { version: candidate.version, path: candidate.path, replaced: { kind: 'symlink', target: entry.target } }
+    return {
+      version: candidate.version, path: candidate.path,
+      ...(configPath === undefined ? {} : { configPath }),
+      replaced: { kind: 'symlink', target: entry.target },
+    }
   }
   if (entry.kind === 'file' && typeof entry.backup === 'string') {
-    return { version: candidate.version, path: candidate.path, replaced: { kind: 'file', backup: entry.backup } }
+    return {
+      version: candidate.version, path: candidate.path,
+      ...(configPath === undefined ? {} : { configPath }),
+      replaced: { kind: 'file', backup: entry.backup },
+    }
   }
   return undefined
 }
@@ -259,6 +301,7 @@ export async function installCliLauncher(
   environment: CliLauncherEnvironment,
   operations: CliLauncherOperations,
 ): Promise<CliInstallResult> {
+  const shimSource = environment.platform === 'win32' ? environment.shimSource : undefined
   const candidates = cliLauncherDirectories(environment)
     .filter(directory => operations.isDirectory(directory))
   const writable = candidates.find(directory => operations.isWritableDirectory(directory))
@@ -268,10 +311,12 @@ export async function installCliLauncher(
   const directory = writable ?? (environment.platform === 'darwin' ? candidates[0] : undefined)
   if (directory === undefined) return { status: 'no-directory' }
 
+  const usesShim = shimSource !== undefined && operations.exists(shimSource)
   const script = cliLauncherScript(environment)
-  const name = cliLauncherName(environment.platform)
-  const path = environment.platform === 'win32' ? `${directory}\\${name}` : `${directory}/${name}`
-  if (operations.readFile(path) === script) {
+  const name = usesShim ? CLI_LAUNCHER_WINDOWS_EXECUTABLE : cliLauncherName(environment.platform)
+  const separator = environment.platform === 'win32' ? '\\' : '/'
+  const path = `${directory}${separator}${name}`
+  if (!usesShim && operations.readFile(path) === script) {
     return { status: 'unchanged', path, version: environment.version }
   }
 
@@ -280,18 +325,71 @@ export async function installCliLauncher(
     ? { kind: 'symlink', target }
     : operations.exists(path) ? { kind: 'file', backup: `${path}.${environment.version}.bak` } : undefined
 
+  // A Windows launcher executable reads its target from this sibling file, so
+  // the application can move without rebuilding the shim.
+  const configPath = usesShim ? `${directory}${separator}${CLI_LAUNCHER_SHIM_CONFIG}` : undefined
+  const shadowedBy = earlierLauncher(environment, operations, directory)
   if (writable !== undefined) {
     if (replaced?.kind === 'file') operations.rename(path, replaced.backup)
     else if (replaced !== undefined) operations.remove(path)
-    operations.writeFile(path, script, 0o755)
+    if (usesShim && configPath !== undefined) {
+      operations.writeFile(configPath, `${JSON.stringify({ executable: environment.executable, cliEntry: environment.cliEntry }, undefined, 2)}\n`, 0o600)
+      operations.copyFile(shimSource, path)
+    } else {
+      operations.writeFile(path, script, 0o755)
+    }
   } else {
     await operations.runPrivileged(privilegedInstall(path, script, replaced))
   }
 
-  writeCliLauncherState(environment, operations, { version: environment.version, path, ...(replaced === undefined ? {} : { replaced }) })
+  writeCliLauncherState(environment, operations, {
+    version: environment.version,
+    path,
+    ...(configPath === undefined ? {} : { configPath }),
+    ...(replaced === undefined ? {} : { replaced }),
+  })
   const version = await operations.installedVersion(path)
   if (version !== environment.version) return { status: 'unavailable', path }
-  return { status: 'installed', path, version, ...(replaced === undefined ? {} : { replaced }) }
+  const probe = await operations.probeMultica(path)
+  return {
+    status: 'installed',
+    path,
+    version,
+    ...(replaced === undefined ? {} : { replaced }),
+    ...(shadowedBy === undefined ? {} : { shadowedBy }),
+    ...(probe === undefined ? {} : { probe }),
+  }
+}
+
+/**
+ * An earlier PATH entry that still answers for the same command name, which
+ * would take precedence over the launcher being installed.
+ * @param environment - platform and visible PATH entries.
+ * @param operations - filesystem operations.
+ * @param directory - directory receiving the launcher.
+ * @returns the first shadowing path, or undefined when nothing shadows it.
+ */
+function earlierLauncher(
+  environment: CliLauncherEnvironment,
+  operations: CliLauncherOperations,
+  directory: string,
+): string | undefined {
+  const names = environment.platform === 'win32'
+    ? [CLI_LAUNCHER_WINDOWS_EXECUTABLE, CLI_LAUNCHER_WINDOWS_NAME, CLI_LAUNCHER_NAME]
+    : [CLI_LAUNCHER_NAME]
+  const separator = environment.platform === 'win32' ? '\\' : '/'
+  // Lookup order is PATH order: a directory this launcher is written to wins
+  // only against entries that come after it. A directory absent from PATH is
+  // shadowed by every entry, because nothing would ever look inside it.
+  const position = environment.pathEntries.indexOf(directory)
+  const earlier = position === -1 ? environment.pathEntries : environment.pathEntries.slice(0, position)
+  for (const entry of earlier) {
+    for (const name of names) {
+      const candidate = `${entry}${separator}${name}`
+      if (operations.exists(candidate)) return candidate
+    }
+  }
+  return undefined
 }
 
 /**
@@ -307,6 +405,7 @@ export function removeCliLauncher(
   const state = readCliLauncher(environment, operations)
   if (state === undefined) return { status: 'absent' }
   if (operations.isDirectory(state.path)) return { status: 'unavailable', path: state.path }
+  if (state.configPath !== undefined) operations.remove(state.configPath)
   if (!operations.exists(state.path)) {
     operations.remove(environment.stateFile)
     return { status: 'removed', path: state.path }
@@ -348,13 +447,17 @@ function runPrivilegedShell(script: string): Promise<void> {
 }
 
 /**
- * Ask the installed launcher for the version it reports.
+ * Run one launcher program and return its trimmed standard output.
+ * Windows resolves a `.cmd` launcher only through a shell, so that platform
+ * runs the command through its own interpreter.
  * @param path - absolute launcher path.
- * @returns the reported version, or undefined when the launcher fails.
+ * @param args - arguments appended to the launcher.
+ * @param timeoutMs - bound on the child's lifetime.
+ * @returns the child's stdout, or undefined when it failed or printed nothing.
  */
-function probeInstalledVersion(path: string): Promise<string | undefined> {
+function runLauncher(path: string, args: readonly string[], timeoutMs: number): Promise<string | undefined> {
   return new Promise((resolve) => {
-    execFile(path, ['--version'], { timeout: 60_000 }, (error, stdout) => {
+    execFile(path, [...args], { timeout: timeoutMs, shell: process.platform === 'win32' }, (error, stdout) => {
       if (error !== null) {
         resolve(undefined)
         return
@@ -363,6 +466,35 @@ function probeInstalledVersion(path: string): Promise<string | undefined> {
       resolve(reported === '' ? undefined : reported)
     })
   })
+}
+
+/**
+ * Ask the installed launcher for the version it reports.
+ * @param path - absolute launcher path.
+ * @returns the reported version, or undefined when the launcher fails.
+ */
+function probeInstalledVersion(path: string): Promise<string | undefined> {
+  return runLauncher(path, ['--version'], 60_000)
+}
+
+/**
+ * Ask the installed launcher whether the Multica bridge profile answers, which
+ * is the gate another runtime reads before it registers this machine.
+ * @param path - absolute launcher path.
+ * @returns the bridge's reported runtime name, or undefined when it did not answer.
+ */
+async function probeMultica(path: string): Promise<string | undefined> {
+  const reported = await runLauncher(path, ['--profile', 'multica', '--probe'], 120_000)
+  if (reported === undefined) return undefined
+  try {
+    const value: unknown = JSON.parse(reported.split(/\r?\n/u)[0] ?? '')
+    if (typeof value !== 'object' || value === null) return undefined
+    const runtime = (value as Record<string, unknown>).runtime
+    return typeof runtime === 'string' && runtime !== '' ? runtime : undefined
+  } catch {
+    // A non-JSON answer means the profile is absent or its bridge is broken.
+    return undefined
+  }
 }
 
 /**
@@ -406,9 +538,11 @@ export function systemCliLauncherOperations(): CliLauncherOperations {
     },
     writeFile: (path, contents, mode) => { writeFileSync(path, contents, { mode }) },
     writeLink: (path, target) => { symlinkSync(target, path) },
+    copyFile: (from, to) => { copyFileSync(from, to) },
     rename: (from, to) => { renameSync(from, to) },
     remove: (path) => { rmSync(path, { force: true }) },
     runPrivileged: runPrivilegedShell,
     installedVersion: probeInstalledVersion,
+    probeMultica,
   }
 }

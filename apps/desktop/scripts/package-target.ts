@@ -368,6 +368,7 @@ export async function packageTarget(
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
   await execute(['run', 'prepare:dsh'], targetEnv)
+  if (target.platform === 'win32') await execute(['run', 'prepare:cli-shim'], targetEnv)
   if (invocation.prepareOnly) return
   // 2026-09-19 coder(lq): unsigned mac uses a single electron-builder pass and skips notarized ZIP/DMG wrapping.
   if (target.platform === 'darwin' && !invocation.directory && !invocation.unsigned) {

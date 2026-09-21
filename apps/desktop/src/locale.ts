@@ -105,6 +105,9 @@ export const en = {
   webInterfaceMenu: 'Open Web Interface in Browser',
   webInterfaceTitle: 'Web Interface',
   webInterfaceUnavailable: 'The Web interface is not ready yet. Try again once the workspace has loaded.',
+  commandLineShadowed: 'Another dsh earlier on PATH ({path}) keeps precedence until it is removed.',
+  commandLineProbeReady: 'MissionOS bridge check passed (--profile multica --probe).',
+  commandLineProbeMissing: 'The Multica bridge profile did not answer (--profile multica --probe), so MissionOS will not register this machine yet.',
 } as const
 
 /** Every Desktop locale supplies the complete English key set. */
@@ -215,6 +218,9 @@ export const zh = {
   webInterfaceMenu: '在浏览器中打开 Web 界面',
   webInterfaceTitle: 'Web 界面',
   webInterfaceUnavailable: 'Web 界面尚未就绪，请等待工作区加载完成后再试。',
+  commandLineShadowed: 'PATH 上更靠前的 {path} 会优先于这个启动器，需先移除它。',
+  commandLineProbeReady: 'MissionOS 桥接检查通过（--profile multica --probe）。',
+  commandLineProbeMissing: 'Multica 桥接 profile 未响应（--profile multica --probe），在它可用前 MissionOS 不会注册本机。',
 } as const satisfies DesktopMessages
 
 /** Locale payload exposed to the Desktop-owned renderer. */
