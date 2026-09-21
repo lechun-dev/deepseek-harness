@@ -1,5 +1,6 @@
 /** Launch the Desktop profile through the Web application and report its URL to Electron. */
 
+import { createServer } from 'node:net'
 import { delimiter, join } from 'node:path'
 import { loadLayeredEnv, loadProfileDirectory, probeWebListen, type WebListenRecord } from '@deepseek-ai/dsh-app-boot'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
@@ -10,16 +11,39 @@ import * as desktopOffice from './office.ts'
 
 import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 
+/** Port the Web bundle composes when an invocation names none (`packages/bundle/web-app/cordis.patch.yml`). */
+const WEB_DEFAULT_PORT = 3080
+
+/**
+ * Whether this machine's loopback interface binds a port right now.
+ * @param port - Loopback port to test.
+ * @returns true when the probe bound and released that port.
+ */
+function loopbackPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer()
+    probe.once('error', () => { resolve(false) })
+    probe.listen(port, '127.0.0.1', () => { probe.close(() => { resolve(true) }) })
+  })
+}
+
 /**
  * Arguments owned by the Desktop-launched Web runner.
  *
- * The Host still adopts an already-published service for this Harness home
- * before it boots. When no adoptable sibling exists, let the Web server choose
- * a free loopback port instead of competing for the Web CLI's default 3080;
- * Electron uses the authenticated URL reported after boot.
+ * The Host adopts an already-published service for this Harness home before it
+ * boots. With no adoptable sibling, Desktop keeps the Web address every other
+ * surface composes by letting the Web server bind its own default port, so the
+ * browser, a later `dsh web`, and every tool that knows that address reach the
+ * one service this home runs; an occupied port fails that row instead, so the
+ * probe then falls back to an OS-assigned loopback port. Electron uses the
+ * authenticated URL reported after boot either way.
+ * @param available - Whether one loopback port binds right now; tests replace it.
+ * @returns the inner arguments for the Desktop Web invocation.
  */
-export function desktopHostWebArgs(): readonly string[] {
-  return ['--no-open', '--port', '0']
+export async function desktopHostWebArgs(
+  available: (port: number) => Promise<boolean> = loopbackPortAvailable,
+): Promise<readonly string[]> {
+  return await available(WEB_DEFAULT_PORT) ? ['--no-open'] : ['--no-open', '--port', '0']
 }
 
 /** The parent IPC channel this Host is spawned with; `process` in production. */
@@ -81,7 +105,7 @@ async function main(): Promise<void> {
     resolutionMode: process.argv[5] === 'runtime' ? 'runtime' : 'link',
     resolvedProfile: { profile, installAnchor },
     patchFiles: [],
-    args: desktopHostWebArgs(),
+    args: await desktopHostWebArgs(),
     ...(process.argv[6] === undefined ? {} : {
       packageManager: {
         command: process.execPath,

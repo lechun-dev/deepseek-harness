@@ -78,7 +78,11 @@ describe('adoptPublishedService', () => {
 })
 
 describe('desktopHostWebArgs', () => {
-  it('lets Desktop boot on a free loopback port when the Web default is occupied', () => {
-    expect(desktopHostWebArgs()).toEqual(['--no-open', '--port', '0'])
+  it('keeps the composed Web default while that port is free', async () => {
+    expect(await desktopHostWebArgs(async port => port === 3080)).toEqual(['--no-open'])
+  })
+
+  it('falls back to an OS-assigned loopback port when the default is occupied', async () => {
+    expect(await desktopHostWebArgs(async () => false)).toEqual(['--no-open', '--port', '0'])
   })
 })

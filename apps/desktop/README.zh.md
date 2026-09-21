@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-桌面应用是完整 dsh Web 应用外的一层 Electron 壳。Electron RunAsNode 子进程启动共享 profile runner，Electron 立即从 `dsh-app://app/` 加载打包内的 Web 入口。共享加载页等待 Host 启动注入，然后在同一文档中启动客户端。Electron 将应用 HTTP 请求转发给已认证的 Web Host；WebSocket 流连接到该 Host，仅为归属的应用窗口附加凭据。Node IPC 承载启动注入、就绪与关闭。桌面端与 Web 默认使用同一个端口 `3080`，可用 `webserver.config.port` patch 覆盖：同一个 Harness home 只服务一个 Web 运行时，因此子进程会采用另一个形态已在该 home 发布的服务，而不是再绑一个端口；桌面窗口与正在运行的 `dsh web` 共用同一份会话与流。
+桌面应用是完整 dsh Web 应用外的一层 Electron 壳。Electron RunAsNode 子进程启动共享 profile runner，Electron 立即从 `dsh-app://app/` 加载打包内的 Web 入口。共享加载页等待 Host 启动注入，然后在同一文档中启动客户端。Electron 将应用 HTTP 请求转发给已认证的 Web Host；WebSocket 流连接到该 Host，仅为归属的应用窗口附加凭据。Node IPC 承载启动注入、就绪与关闭。桌面端与 Web 默认使用同一个端口 `3080`，可用 `webserver.config.port` patch 覆盖：同一个 Harness home 只服务一个 Web 运行时，因此子进程会采用另一个形态已在该 home 发布的服务，而不是再绑一个端口；桌面窗口与正在运行的 `dsh web` 共用同一份会话与流。当该端口已被占用、且本 home 没有可采用的已发布服务时，子进程改为绑定操作系统分配的 loopback 端口，而不是启动失败。
 
 应用菜单第一项“**关于 DeepSeek Harness**”打开 Electron 原生关于面板，展示应用图标、产品名称和当前安装的发布版本。菜单文案跟随桌面壳的语言。macOS 从应用包读取图标，因此未打包的开发启动会显示 Electron 图标；Windows 使用随包分发的 PNG。
 
