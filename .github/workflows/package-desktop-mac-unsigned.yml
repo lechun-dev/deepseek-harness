@@ -104,22 +104,61 @@ jobs:
           cat > "$packed_dir/INSTALL.txt" <<'EOF'
           DeepSeek Harness CLI package set, packed from this run's commit.
 
-          Install into the shared Harness home (paths must be absolute, or npm
-          reads `dsh/...` as a GitHub shorthand):
+          Unzip this artifact and run one command:
 
-            npm install --prefix "$HOME/.dsh/cli" --no-audit --no-fund \
-              --package-lock=false "$PWD"/vendor/*.tgz "$PWD"/dsh/*.tgz "$PWD"/landlock/*.tgz
+            ./install.sh
 
-          Then make this installation the machine's `dsh` (record the previous
-          target first, so the change is reversible):
-
-            readlink "$(command -v dsh)"
-            ln -sfn "$HOME/.dsh/cli/node_modules/@deepseek-ai/dsh/lib/bin.js" \
-              "$(dirname "$(command -v dsh)")/dsh"
+          It installs into the shared Harness home (override with DSH_CLI_PREFIX)
+          and points this machine's `dsh` at that installation, recording the
+          previous target for rollback.
 
           Start the shared Web service with `dsh web`; a desktop build of the
           same commit then attaches to it instead of serving its own socket.
           EOF
+          cat > "$packed_dir/install.sh" <<'SH'
+          #!/bin/sh
+          # Install this packed DeepSeek Harness CLI and make it the machine's
+          # `dsh`. Run from the directory holding dsh/, vendor/, and landlock/.
+          set -eu
+
+          here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          prefix=${DSH_CLI_PREFIX:-"$HOME/.dsh/cli"}
+          node=${DSH_CLI_NODE:-node}
+
+          command -v npm >/dev/null 2>&1 || { echo "install.sh: npm is required" >&2; exit 1; }
+          command -v "$node" >/dev/null 2>&1 || { echo "install.sh: node is required" >&2; exit 1; }
+
+          # Absolute tarball paths: npm reads a relative `dsh/x.tgz` as a GitHub shorthand.
+          npm install --prefix "$prefix" --no-audit --no-fund --package-lock=false \
+            "$here"/vendor/*.tgz "$here"/dsh/*.tgz "$here"/landlock/*.tgz
+
+          entry="$prefix/node_modules/@deepseek-ai/dsh/lib/bin.js"
+          [ -f "$entry" ] || { echo "install.sh: $entry is missing after install" >&2; exit 1; }
+          echo "version: $("$node" "$entry" --version)"
+
+          current=$(command -v dsh || true)
+          if [ -n "$current" ]; then
+            if [ -L "$current" ]; then
+              previous=$(readlink "$current")
+              printf 'symlink %s\n' "$previous" > "$prefix/previous-dsh-target"
+              rollback="ln -sfn '$previous' '$current'"
+            else
+              # A regular file (not an npm link) is preserved, never overwritten silently.
+              backup="$prefix/previous-dsh-file"
+              cp -p "$current" "$backup"
+              printf 'file %s\n' "$backup" > "$prefix/previous-dsh-target"
+              rollback="rm -f '$current' && cp -p '$backup' '$current'"
+            fi
+            ln -sfn "$entry" "$current"
+            echo "dsh: $current -> $entry"
+            echo "rollback: $rollback"
+          else
+            mkdir -p "$prefix/bin"
+            ln -sfn "$entry" "$prefix/bin/dsh"
+            echo "no dsh on PATH; add $prefix/bin to PATH (or link $entry yourself)"
+          fi
+          SH
+          chmod 755 "$packed_dir/install.sh"
 
       - name: Upload CLI package set
         if: matrix.target == 'mac-arm64'
@@ -132,6 +171,7 @@ jobs:
             apps/desktop/.desktop-build/targets/mac-arm64/packed/vendor/*.tgz
             apps/desktop/.desktop-build/targets/mac-arm64/packed/landlock/*.tgz
             apps/desktop/.desktop-build/targets/mac-arm64/packed/INSTALL.txt
+            apps/desktop/.desktop-build/targets/mac-arm64/packed/install.sh
           retention-days: 14
 
       - name: Upload unsigned artifacts
