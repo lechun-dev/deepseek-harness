@@ -92,6 +92,48 @@ jobs:
           Get-ChildItem -Path $artifactDir -File | Where-Object { $_.Extension -ine '.exe' } | Remove-Item -Force
           Get-ChildItem -Path $artifactDir -File | ForEach-Object { $_.FullName }
 
+      # Packaging already packs every dsh and vendored tarball for its own
+      # runtime; uploading that same set makes one run yield an installable CLI,
+      # so another machine needs no checkout and no local build. The tarballs
+      # carry JavaScript only: native dependencies resolve from the registry at
+      # install time, so one target's set installs on any architecture.
+      - name: Write CLI package set instructions
+        if: matrix.target == 'mac-arm64'
+        run: |
+          packed_dir="apps/desktop/.desktop-build/targets/${{ matrix.target }}/packed"
+          cat > "$packed_dir/INSTALL.txt" <<'EOF'
+          DeepSeek Harness CLI package set, packed from this run's commit.
+
+          Install into the shared Harness home (paths must be absolute, or npm
+          reads `dsh/...` as a GitHub shorthand):
+
+            npm install --prefix "$HOME/.dsh/cli" --no-audit --no-fund \
+              --package-lock=false "$PWD"/vendor/*.tgz "$PWD"/dsh/*.tgz "$PWD"/landlock/*.tgz
+
+          Then make this installation the machine's `dsh` (record the previous
+          target first, so the change is reversible):
+
+            readlink "$(command -v dsh)"
+            ln -sfn "$HOME/.dsh/cli/node_modules/@deepseek-ai/dsh/lib/bin.js" \
+              "$(dirname "$(command -v dsh)")/dsh"
+
+          Start the shared Web service with `dsh web`; a desktop build of the
+          same commit then attaches to it instead of serving its own socket.
+          EOF
+
+      - name: Upload CLI package set
+        if: matrix.target == 'mac-arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-cli-unsigned
+          if-no-files-found: error
+          path: |
+            apps/desktop/.desktop-build/targets/mac-arm64/packed/dsh/*.tgz
+            apps/desktop/.desktop-build/targets/mac-arm64/packed/vendor/*.tgz
+            apps/desktop/.desktop-build/targets/mac-arm64/packed/landlock/*.tgz
+            apps/desktop/.desktop-build/targets/mac-arm64/packed/INSTALL.txt
+          retention-days: 14
+
       - name: Upload unsigned artifacts
         uses: actions/upload-artifact@v4
         with:
