@@ -702,7 +702,8 @@ describe('desktop main startup', () => {
   it('serves packaged shell overlay pages and keeps other custom-protocol hosts closed', async () => {
     // 2026-09-20 coder(lq): production protocol.handle previously 404ed dsh-app://shell/*, which white-screens the update overlay.
     await readyForUpdate()
-    const handler = vi.mocked(protocol.handle).mock.calls[0]![1] as (request: Request) => Promise<Response> | Response
+    const protocolMock = vi.mocked(protocol)
+    const handler = protocolMock.handle.mock.calls[0]![1]
     const shellRoot = join('desktop-test-app', 'renderer')
     const frontendRoot = join('desktop-test-app', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist')
 
