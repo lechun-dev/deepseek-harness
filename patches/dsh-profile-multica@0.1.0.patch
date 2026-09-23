@@ -1,0 +1,122 @@
+diff --git a/cordis.patch.yml b/cordis.patch.yml
+index 4daeb7faa1e059699ac5cc154bcee8f0059fb493..1cad5e02f62c1da26929907c755b5e71839d8c1d 100644
+--- a/cordis.patch.yml
++++ b/cordis.patch.yml
+@@ -44,9 +44,6 @@
+-    mode: !!js process.env.DSH_TOOLS_MODE
++    mode: !!js process.env.DSH_TOOLS_MODE
+-
++
+-- insert:
++- insert:
+-    - id: code-runtime
+-      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+-
+-    - id: multica-startup
++    - id: multica-startup
+-      name: 'dsh-profile-multica/startup'
++      name: 'dsh-profile-multica/startup'
+-
++
+diff --git a/lib/index.js b/lib/index.js
+index ca3cfec2f82a327bd3289ed3a7ac0869e046f7ba..d03bd9eb7ae3666ac0f6c0e0610e1355c3832645 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -1,7 +1,5 @@
+-import { randomUUID } from "node:crypto";
++import { randomUUID } from "node:crypto";
+-import { readFileSync } from "node:fs";
+-import { createInterface } from "node:readline";
++import { createInterface } from "node:readline";
+-import { fileURLToPath } from "node:url";
+-import z from "@deepseek-ai/schemastery";
++import z from "@deepseek-ai/schemastery";
+-import { installModelSelection } from "@deepseek-ai/dsh-agent";
++import { installModelSelection } from "@deepseek-ai/dsh-agent";
+-import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
++import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";
+@@ -151,8 +149,7 @@ const internals = {
+-	}
++	}
+-};
++};
+-function version() {
++function version() {
+-	const manifest = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
+-	return typeof manifest.version === "string" ? manifest.version : "0.0.0";
++	return "0.1.0";
+-}
++}
+-function frame(io, value) {
++function frame(io, value) {
+-	io.stdout.write(encodeMulticaFrame(value));
++	io.stdout.write(encodeMulticaFrame(value));
+@@ -219,28 +216,25 @@ function contentText(blocks) {
+-		}
++		}
+-	}).join("");
++	}).join("");
+-}
++}
++function combineDisposers(...disposers) {
++	return () => { for (const dispose of disposers) dispose(); };
++}
+-function observe(io, requestId, agent) {
++function observe(io, requestId, agent) {
++	const disposeStream = agent.ctx.on("agent/assistant-stream", ({ agent: source, frame: publication }) => {
++		if (source !== agent || publication.type !== "chunk") return;
++		const chunk = publication.chunk;
++		if (chunk.type === "text-delta" || chunk.type === "reasoning-delta") frame(io, {
++			v: 1,
++			type: chunk.type === "text-delta" ? "text" : "thinking",
++			request_id: requestId,
++			content: chunk.text
++		});
++	});
+-	const outcome = { output: "" };
++	const outcome = { output: "" };
+-	return {
++	return {
+-		outcome,
++		outcome,
+-		dispose: agent.ctx.on("session/event", (session, event) => {
++		dispose: combineDisposers(disposeStream, agent.ctx.on("session/event", (session, event) => {
+-			if (session.id !== agent.session.id) return;
++			if (session.id !== agent.session.id) return;
+-			if (event.type === "assistant/chunk") {
+-				const chunk = event.data.chunk;
+-				if (chunk.type === "text-delta") frame(io, {
+-					v: 1,
+-					type: "text",
+-					request_id: requestId,
+-					content: chunk.text
+-				});
+-				if (chunk.type === "reasoning-delta") frame(io, {
+-					v: 1,
+-					type: "thinking",
+-					request_id: requestId,
+-					content: chunk.text
+-				});
+-				return;
+-			}
+-			if (event.type === "assistant/message") {
++			if (event.type === "assistant/message") {
+-				outcome.output = event.data.message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
++				outcome.output = event.data.message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+-				const usage = event.data.usage;
++				const usage = event.data.usage;
+@@ -282,7 +276,7 @@ function observe(io, requestId, agent) {
+-				return;
++				return;
+-			}
++			}
+-			if (event.type === "turn/end") outcome.reason = event.data.reason;
++			if (event.type === "turn/end") outcome.reason = event.data.reason;
+-		})
++		}))
+-	};
++	};
+-}
++}
+-function resultFrame(requestId, sessionId, outcome) {
++function resultFrame(requestId, sessionId, outcome) {

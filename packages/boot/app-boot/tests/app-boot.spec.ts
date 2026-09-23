@@ -563,6 +563,8 @@ describe('auditStartupEntries', () => {
     'headless-runner',
     'acp',
     'sdk-jsonrpc-server',
+    'multica-startup',
+    'multica-runner',
   ]
 
   interface FakeEntry {

@@ -7,6 +7,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { readPrimaryRuntime, workspaceDependencyPaths } from '../../../packages/skill/tool-workspace-dependencies/src/index.ts'
+import { smokeMulticaProfile } from './smoke-multica.ts'
+import { desktopNodeEnvironment } from '../src/node-environment.ts'
 import { DesktopHostProcess } from '../src/host-process.ts'
 import { createPluginProfile } from '../src/project-manager.ts'
 import type { DesktopRuntimeDescriptor } from '../src/runtime-tree.ts'
@@ -30,6 +32,9 @@ export async function smokeDesktopRuntime(
     { pnpm: join(resourcesRuntime, 'pnpm', 'bin', 'pnpm.cjs'), nodeBin: join(resourcesRuntime, 'bin') })
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    await smokeMulticaProfile(root, node, desktopNodeEnvironment(node, join(resourcesRuntime, 'bin'), {
+      ...environment, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1',
+    }))
     createPluginProfile(profile)
     const pluginName = 'desktop-runtime-smoke-plugin'
     const plugin = join(profile, 'node_modules', pluginName)

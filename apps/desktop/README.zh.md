@@ -422,3 +422,5 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 ## 开发备注
 
 上线前 CDN 与容量决策见[桌面更新提案](../../.agents/notes/proposed/feature/2026-09-08-desktop-update-policy-and-installation.zh.md#cdn-and-capacity-qualification)。
+
+内置 CLI 包含 [Multica / MissionOS profile](../cli/README.zh.md#multica--missionos)。准备后的运行时及打包后的 ASAR 冒烟检查均要求通过探测、模型列表和 JSONL 启动验证。

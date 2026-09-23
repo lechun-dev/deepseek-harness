@@ -17,7 +17,7 @@
 | `dsh web` | 启动 Web profile。 |
 | `dsh plugin --profile <name> <pnpm args>` | 通过在 profile 目录中转发给 pnpm 来管理该 profile 的插件。 |
 
-运行命令时所在的目录将作为默认 workspace 根目录。`web`、`headless`、`sdk`、`sdk-minimal` 和 `acp` profile 在首次使用时会从随附模板自动初始化。使用 `--from-default-profile` 可以基于这些模板之一，在尚未使用的非内置名称处创建其他 profile；通过 `dsh plugin` 则可以初始化一个以 base 为基础的 profile。`desktop` 名称保留给 Electron 持有的 profile，因此 CLI（命令行界面）会拒绝针对它的启动、配置 dump 和插件管理请求。
+运行命令时所在的目录将作为默认 workspace 根目录。`web`、`headless`、`sdk`、`sdk-minimal`、`multica` 和 `acp` profile 在首次使用时会从随附模板自动初始化。使用 `--from-default-profile` 可以基于这些模板之一，在尚未使用的非内置名称处创建其他 profile；通过 `dsh plugin` 则可以初始化一个以 base 为基础的 profile。`desktop` 名称保留给 Electron 持有的 profile，因此 CLI（命令行界面）会拒绝针对它的启动、配置 dump 和插件管理请求。
 
 ## 应用参数
 
@@ -46,6 +46,12 @@ profile 目录包含一个 `package.json`，其中记录树外插件依赖，以
 使用 `--dump-default-config` 和 `--dump-config` 可在不启动的情况下检查组合后的配置树。`--dump-config-schema` 会导入组合树中插件声明的 schema，并打印描述 entry 与 patch 的 JSON Schema，而不是配置值；检查不受信任的插件前，请阅读 [schema dump 的安全性与范围](reference/README.zh.md#config-schema-dump)。
 
 层的确切优先级、flag、关闭行为、部署默认值和源码执行方式，以 [CLI 行为参考](reference/README.zh.md)为准。[启动与重载失败表](../../packages/boot/app-boot/README.zh.md#startup-and-reload-failures)对比 optional、required 插件启动失败与配置 HMR 的行为。
+
+## Multica / MissionOS
+
+`dsh --profile multica --probe` 返回协议 v1 探测信息；`--list-models` 列出模型，`--stdio` 通过 JSONL 提供执行、流式输出、取消和会话恢复。执行需要模型提供商凭据。首次使用会创建随附 profile，不覆盖已有 profile 或用户 patch。
+
+CLI 内置 MIT 许可的 `dsh-profile-multica@0.1.0` 桥接代码，并以兼容补丁适配当前助手流 API；[LICENSE.multica](LICENSE.multica) 保留其版权声明。无需另行安装插件。默认沙箱允许工作区写入，不进行交互式审批；需要更大权限的请求会被拒绝。`DSH_PERMISSION_MODE` 可选择 `read-only`、`workspace-write` 或显式不受限的 `danger-full-access`；`MULTICA_DSH_SESSION_ROOT` 可覆盖会话存储目录。
 
 ## 可选覆盖层
 

@@ -422,3 +422,5 @@ The account provider’s `embeddedPageDist` configuration adds a `dist` query pa
 ## Dev Note
 
 Pre-launch CDN and capacity decisions are tracked in the [Desktop update proposal](../../.agents/notes/proposed/feature/2026-09-08-desktop-update-policy-and-installation.md#cdn-and-capacity-qualification).
+
+The bundled CLI includes the [Multica / MissionOS profile](../cli/README.md#multica--missionos). Prepared-runtime and packaged-ASAR smoke checks require discovery, model listing, and JSONL startup.

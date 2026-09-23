@@ -17,7 +17,7 @@ The `dsh` command is the sole supported Node application launcher: profiles are 
 | `dsh web` | Boot the Web profile. |
 | `dsh plugin --profile <name> <pnpm args>` | Manage a profile's plugins by forwarding to pnpm in the profile directory. |
 
-The invoking directory is the default workspace root. The `web`, `headless`, `sdk`, `sdk-minimal`, and `acp` profiles auto-initialize on first use from shipped templates. Create another profile at an unused, non-shipped name with `--from-default-profile`, or initialize a base-backed profile through `dsh plugin`. The `desktop` name is reserved for the Electron-owned profile, so the CLI rejects boot, config-dump, and plugin-management requests for it.
+The invoking directory is the default workspace root. The `web`, `headless`, `sdk`, `sdk-minimal`, `multica`, and `acp` profiles auto-initialize on first use from shipped templates. Create another profile at an unused, non-shipped name with `--from-default-profile`, or initialize a base-backed profile through `dsh plugin`. The `desktop` name is reserved for the Electron-owned profile, so the CLI rejects boot, config-dump, and plugin-management requests for it.
 
 ## App arguments
 
@@ -46,6 +46,12 @@ Bundles named in `dsh.profile.bundles` resolve from the dsh installation first (
 Use `--dump-default-config` and `--dump-config` to inspect the composed tree without booting it. `--dump-config-schema` imports the composed tree's declared plugin schemas and prints JSON Schema for entries and patches instead of configuration values; read the [schema-dump safety and scope](reference/README.md#config-schema-dump) before inspecting untrusted plugins.
 
 The [CLI behavior reference](reference/README.md) owns exact layer precedence, flags, shutdown behavior, deployment defaults, and source execution. The [startup and reload failure table](../../packages/boot/app-boot/README.md#startup-and-reload-failures) compares optional and required plugin failures with configuration HMR.
+
+## Multica / MissionOS
+
+`dsh --profile multica --probe` reports protocol-v1 discovery; `--list-models` lists models and `--stdio` serves JSONL execute, streaming, cancellation, and session-resume requests. Execution requires provider credentials. First use creates the shipped profile without overwriting an existing profile or user patch.
+
+The CLI bundles the MIT-licensed `dsh-profile-multica@0.1.0` bridge with compatibility patches for the current assistant stream API; [LICENSE.multica](LICENSE.multica) retains its attribution. No separate plugin installation is required. The default sandbox permits workspace writes without interactive approvals; requests requiring wider authority are rejected. `DSH_PERMISSION_MODE` selects `read-only`, `workspace-write`, or explicitly unrestricted `danger-full-access`; `MULTICA_DSH_SESSION_ROOT` overrides session storage.
 
 ## Optional overlays
 

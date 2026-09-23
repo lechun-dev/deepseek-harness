@@ -1,0 +1,54 @@
+# Multica starts one dsh process per task and supplies a dedicated persistence
+# root for every registered runtime.
+
+- id: hmr
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.MULTICA_DSH_SESSION_ROOT ?? dshHomePath('sessions')
+
+# The Multica wire protocol has no interactive approval round trip. Keep the
+# base sandbox and reject operations that require wider authority.
+- id: approval
+  config:
+    policy: never
+
+- id: permission
+  config:
+    defaultPreset: !!js >-
+      process.env.DSH_PERMISSION_MODE === 'read-only'
+        ? 'multica-read-only'
+        : process.env.DSH_PERMISSION_MODE === 'danger-full-access'
+          ? 'danger-full-access'
+          : 'multica-workspace-write'
+    presets:
+      multica-read-only:
+        sandbox: read-only
+        approval: never
+        name: Multica read-only
+        description: Confine file effects and reject requests that need wider access.
+      multica-workspace-write:
+        sandbox: workspace-write
+        approval: never
+        name: Multica workspace-write
+        description: Allow workspace writes and reject requests that need wider access.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+        name: Danger full access
+        description: Allow unrestricted file effects without approval prompts.
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+- insert:
+    - id: multica-startup
+      name: '@deepseek-ai/dsh/lib/multica-startup.js'
+
+    - id: multica-runner
+      name: '@deepseek-ai/dsh/lib/multica.js'
+      inject: [multicaStartup]
+      config:
+        mode: !!js ctx.multicaStartup.mode
