@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
+import { createRuntimeProjectMetadata } from '../src/project-manager.ts'
+import { DESKTOP_HOST_PROTOCOL_VERSION } from '../src/host-protocol.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   DESKTOP_PACKAGES_DIR,
@@ -66,6 +69,21 @@ describe('desktop core package set', () => {
       '@deepseek-ai/dsh-base': 'file:./desktop-packages/dsh-base.tgz',
       '@deepseek-ai/dsh-desktop-host': 'file:./desktop-packages/dsh-desktop-host.tgz',
     })
+  })
+
+  it('stages the Office patch in the independent runtime install project', () => {
+    const { root } = packageSetProject()
+    const patch = join(root, 'source-office.patch')
+    writeFileSync(patch, 'fixture patch bytes\n')
+    createRuntimeProjectMetadata(root, {
+      schemaVersion: 1, version: '1.2.3', nodeVersion: '24.20.0', pnpmVersion: '11.7.0', hostProtocolVersion: DESKTOP_HOST_PROTOCOL_VERSION,
+    }, patch)
+    const workspace = yaml.load(readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')) as {
+      patchedDependencies?: Record<string, string>
+    }
+    const staged = workspace.patchedDependencies?.['@deepseek-ai/libreoffice-kit@0.0.1']
+    expect(staged).toBe('desktop-patches/libreoffice-kit.patch')
+    expect(readFileSync(join(root, staged!), 'utf8')).toBe('fixture patch bytes\n')
   })
 
   it('rejects version drift, descriptor disorder, corruption, and extra files', () => {

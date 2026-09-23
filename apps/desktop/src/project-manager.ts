@@ -1,6 +1,7 @@
 /** Desktop profile initialization and native recovery. */
 
 import {
+  copyFileSync,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -130,8 +131,13 @@ export class DesktopProjectManager {
   }
 }
 
-/** Create build-only project metadata for materializing the signed runtime. */
-export function createRuntimeProjectMetadata(projectDir: string, release: DesktopRelease): void {
+/**
+ * Create the isolated runtime install project with its required Office engine patch.
+ * @param projectDir - Build-only project containing the verified local package set.
+ * @param release - Release identity of the staged packages.
+ * @param officePatchPath - Repository Office patch copied before dependency resolution.
+ */
+export function createRuntimeProjectMetadata(projectDir: string, release: DesktopRelease, officePatchPath: string): void {
   mkdirSync(projectDir, { recursive: true, mode: 0o700 })
   const packageSet = verifyDesktopCorePackageSet(projectDir, release.version)
   const manifest = {
@@ -141,10 +147,13 @@ export function createRuntimeProjectMetadata(projectDir: string, release: Deskto
     dependencies: desktopCorePackageOverrides(packageSet),
     dsh: { profile: { bundles: [...WEB_PROFILE.bundles] } },
   }
+  const patch = 'desktop-patches/libreoffice-kit.patch'
+  mkdirSync(join(projectDir, 'desktop-patches'), { recursive: true, mode: 0o700 })
+  copyFileSync(officePatchPath, join(projectDir, patch))
   writeJson(join(projectDir, 'package.json'), manifest)
   writeFileSync(
     join(projectDir, 'pnpm-workspace.yaml'),
-    workspaceFile(desktopCorePackageOverrides(packageSet)),
+    `${workspaceFile(desktopCorePackageOverrides(packageSet))}patchedDependencies:\n  '@deepseek-ai/libreoffice-kit@0.0.1': ${patch}\n`,
     { mode: 0o600 },
   )
 }
