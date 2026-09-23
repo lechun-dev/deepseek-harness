@@ -35,6 +35,7 @@ export interface DesktopElectronBuilderConfig {
   }
   readonly win: {
     readonly forceCodeSigning: boolean
+    readonly signExecutable: boolean
     readonly signtoolOptions: {
       readonly publisherName: string | undefined
       readonly sign: ((configuration: { path: string, hash: string, isNest: boolean }) => Promise<void>) | undefined
