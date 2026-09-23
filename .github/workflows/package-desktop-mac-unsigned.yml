@@ -2,6 +2,8 @@ name: Package unsigned desktop
 
 # 2026-09-20 coder(lq): fork-friendly unsigned desktop packages without signing credentials.
 on:
+  push:
+    tags: ['dsh-v*-lechun.*']
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,121 @@
+name: Release unsigned desktop
+
+on:
+  workflow_run:
+    workflows: [Package unsigned desktop]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Package unsigned desktop run ID (reuse existing artifacts)
+        required: true
+        type: string
+      release_tag:
+        description: Existing dsh-v*-lechun.* tag pointing at the build commit
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+# Serialize publication, including manual recovery, without cancelling uploads.
+concurrency:
+  group: release-desktop-unsigned
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Do not check out or execute code from the source run: workflow_run has write access.
+      - name: Validate build and resolve release tag
+        id: source
+        uses: actions/github-script@v8
+        env:
+          SOURCE_RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        with:
+          script: |
+            const repo = context.repo;
+            const id = process.env.SOURCE_RUN_ID;
+            if (!/^\d+$/.test(id)) throw new Error('Invalid run ID');
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...repo, run_id: Number(id) });
+            const { data: workflow } = await github.rest.actions.getWorkflow({ ...repo, workflow_id: 'package-desktop-mac-unsigned.yml' });
+            if (run.workflow_id !== workflow.id || run.head_repository?.full_name !== `${repo.owner}/${repo.repo}` ||
+                !['push', 'workflow_dispatch'].includes(run.event) || run.status !== 'completed' || run.conclusion !== 'success') {
+              throw new Error('Source must be a successful, trusted unsigned packaging run in this repository');
+            }
+            const validTag = name => /^dsh-v[0-9][A-Za-z0-9.-]*-lechun\.[0-9]+$/.test(name);
+            let tag = process.env.RELEASE_TAG;
+            if (!tag) {
+              const tags = await github.paginate(github.rest.repos.listTags, { ...repo, per_page: 100 });
+              const matches = tags.filter(t => validTag(t.name) && t.commit.sha === run.head_sha);
+              if (!matches.length) {
+                core.notice('No fork release tag at this commit; artifacts remain on the build run.');
+                return;
+              }
+              if (matches.length !== 1) throw new Error('Multiple matching tags; use manual dispatch to choose one');
+              tag = matches[0].name;
+            }
+            if (!validTag(tag)) throw new Error('Expected a dsh-v*-lechun.N tag');
+            const { data: ref } = await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+            let object = ref.object;
+            while (object.type === 'tag') {
+              const { data } = await github.rest.git.getTag({ ...repo, tag_sha: object.sha });
+              object = data.object;
+            }
+            if (object.type !== 'commit' || object.sha !== run.head_sha) throw new Error('Tag/build SHA mismatch');
+            core.setOutput('tag', tag);
+            core.setOutput('run_id', id);
+            core.setOutput('sha', run.head_sha);
+
+      - name: Download and publish installers
+        if: steps.source.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.source.outputs.run_id }}
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p downloads release-assets
+          for target in mac-arm64 mac-x64 win-x64; do
+            gh run download "$RUN_ID" --name "dsh-desktop-$target-unsigned" --dir "downloads/$target"
+          done
+          gh run download "$RUN_ID" --name dsh-cli-unsigned --dir downloads/cli
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          for target, extension in [('mac-arm64', '.dmg'), ('mac-x64', '.dmg'), ('win-x64', '.exe')]:
+              files = list(Path('downloads', target).rglob('*' + extension))
+              if len(files) != 1 or files[0].stat().st_size == 0:
+                  raise SystemExit(f'Expected exactly one nonempty installer for {target}: {files}')
+              shutil.copyfile(files[0], Path('release-assets', f'dsh-desktop-{target}-unsigned{extension}'))
+          for folder in ['dsh', 'vendor', 'landlock']:
+              if not list(Path('downloads/cli', folder).glob('*.tgz')):
+                  raise SystemExit(f'Missing CLI package folder: {folder}')
+          Path('downloads/cli/install.sh').chmod(0o755)
+          PY
+          tar -czf release-assets/dsh-cli-unsigned.tar.gz -C downloads/cli .
+          (cd release-assets && sha256sum ./*.dmg ./*.exe ./*.tar.gz > SHA256SUMS.txt)
+          # Read the release list successfully before deciding it does not exist.
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | {tag_name, draft}' > releases.jsonl
+          existing=$(jq -sc --arg tag "$RELEASE_TAG" 'map(select(.tag_name == $tag)) | .[0] // null' releases.jsonl)
+          if [ "$existing" != null ] && [ "$(jq -r .draft <<< "$existing")" != true ]; then
+            echo "Release already published; refusing to replace public assets."
+            exit 0
+          fi
+          printf 'Unsigned fork builds for macOS Apple Silicon, macOS Intel, and Windows x64.\n\nCommit: `%s`\nBuild: https://github.com/%s/actions/runs/%s\n\nThese packages are not signed or notarized. CLI package set and SHA-256 checksums are included.\n' \
+            "$SOURCE_SHA" "$GH_REPO" "$RUN_ID" > release-notes.md
+          if [ "$existing" = null ]; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease --title "$RELEASE_TAG" --notes-file release-notes.md
+          fi
+          # A failed upload leaves a draft; rerunning repairs the draft, never a public release.
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          echo "Published $RELEASE_TAG from build $RUN_ID" >> "$GITHUB_STEP_SUMMARY"
