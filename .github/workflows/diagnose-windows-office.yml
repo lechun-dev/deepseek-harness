@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        layout: [short, packaged]
+        layout: [short, packaged, neutral-long, relocated-short]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -35,11 +35,26 @@ jobs:
           DIAGNOSTIC_LAYOUT: ${{ matrix.layout }}
         run: |
           $scratch = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
-          $root = if ($env:DIAGNOSTIC_LAYOUT -eq 'short') { Join-Path $scratch 'app' } else { Join-Path $env:GITHUB_WORKSPACE 'apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked/resources/app.asar.unpacked/dsh' }
+          $packagedRelative = 'apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked/resources/app.asar.unpacked/dsh'
+          $packaged = Join-Path $env:GITHUB_WORKSPACE $packagedRelative
+          $root = switch ($env:DIAGNOSTIC_LAYOUT) {
+            'short' { Join-Path $scratch 'app' }
+            'neutral-long' { Join-Path $env:GITHUB_WORKSPACE ($packagedRelative -replace '[^/]', 'x') }
+            default { $packaged }
+          }
+          if ($env:DIAGNOSTIC_LAYOUT -eq 'neutral-long' -and $root.Length -ne $packaged.Length) {
+            throw 'Neutral control must match packaged path length'
+          }
           New-Item -ItemType Directory -Force $scratch, $root | Out-Null
           try {
             npm install --prefix $root --ignore-scripts --no-audit --no-fund @deepseek-ai/libreoffice-kit@0.0.1
             if ($LASTEXITCODE -ne 0) { throw 'Office engine installation failed' }
+            if ($env:DIAGNOSTIC_LAYOUT -eq 'relocated-short') {
+              $relocated = Join-Path $scratch 'app'
+              Copy-Item -LiteralPath $root -Destination $relocated -Recurse
+              $root = $relocated
+            }
+            Write-Host "Office layout=$env:DIAGNOSTIC_LAYOUT rootLength=$($root.Length) root=$root"
             python -m venv (Join-Path $scratch 'python')
             if ($LASTEXITCODE -ne 0) { throw 'Python environment creation failed' }
             $python = Join-Path $scratch 'python/Scripts/python.exe'

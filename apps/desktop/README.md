@@ -425,4 +425,4 @@ Pre-launch CDN and capacity decisions are tracked in the [Desktop update proposa
 
 The bundled CLI includes the [Multica / MissionOS profile](../cli/README.md#multica--missionos). Prepared-runtime and packaged-ASAR smoke checks require discovery, model listing, and JSONL startup.
 
-The [Windows Office diagnostic workflow](../../.github/workflows/diagnose-windows-office.yml) isolates native DOCX, XLSX and PPTX conversion from Electron, comparing short and packaged-length paths. It is diagnostic only; installer smoke checks and Release publication remain separate requirements.
+The [Windows Office diagnostic workflow](../../.github/workflows/diagnose-windows-office.yml) isolates native DOCX, XLSX and PPTX conversion from Electron, comparing short, packaged-length and equally long neutral paths, plus the same long-path installation copied to a short path. It is diagnostic only; installer smoke checks and Release publication remain separate requirements.
