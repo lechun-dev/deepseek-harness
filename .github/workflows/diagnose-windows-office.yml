@@ -64,11 +64,10 @@ jobs:
             if ($env:DIAGNOSTIC_LAYOUT -eq 'patched') {
               $kit = Join-Path $root 'node_modules/@deepseek-ai/libreoffice-kit'
               $patch = Join-Path $env:GITHUB_WORKSPACE 'patches/@deepseek-ai__libreoffice-kit@0.0.1.patch'
-              Push-Location $kit
-              try {
-                git apply --no-index $patch
-                if ($LASTEXITCODE -ne 0) { throw 'Production patch application failed' }
-              } finally { Pop-Location }
+              $kitRelative = [IO.Path]::GetRelativePath($env:GITHUB_WORKSPACE, $kit).Replace('\', '/')
+              git apply --no-index --directory=$kitRelative $patch
+              if ($LASTEXITCODE -ne 0) { throw 'Production patch application failed' }
+              if (!(Test-Path (Join-Path $kit 'lib/native-paths.js'))) { throw 'Patched native helper is missing' }
               $env:DSH_OFFICE_KIT_DIRECTORY = $kit
               node --test apps/desktop/tests/fixtures/office-engine-paths.test.mjs
               if ($LASTEXITCODE -ne 0) { throw 'Native alias lifecycle tests failed' }
