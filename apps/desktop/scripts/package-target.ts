@@ -23,7 +23,6 @@ import { DESKTOP_BUILD_VERSION_ENV, resolveDesktopBuildVersion, validateDesktopB
 import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts'
 import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
-import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
@@ -36,6 +35,16 @@ const WINDOWS_SIGNING_ENV_NAMES = [
   'DSH_DESKTOP_WINDOWS_SIGNATURE_CACHE_DIR',
   'DSH_DESKTOP_WINDOWS_SIGNATURE_CACHE_CONCURRENCY',
 ] as const
+
+async function withMacOSNotarizationProxyIfNeeded<T>(
+  proxyUrl: string | undefined,
+  action: () => Promise<T>,
+  report: (status: 'not-used' | 'restoration-pending' | 'enabled' | 'restored' | 'restore-failed') => void,
+): Promise<T> {
+  const { withMacOSNotarizationProxy } = await import('./macos-notarization-proxy.ts')
+  return withMacOSNotarizationProxy(proxyUrl, action, undefined, undefined, report)
+}
+
 const DESKTOP_UPLOAD_CREDENTIAL_ENV_NAMES = new Set([
   'DOWNLOAD_TEST_COS_SECRET_ID',
   'DOWNLOAD_TEST_COS_SECRET_KEY',
@@ -476,30 +485,33 @@ export async function packageTarget(
   await execute(['run', 'prepare:runtime', ...(signPrimaryRuntime ? ['--defer-primary-runtime-smoke'] : [])], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime'], electronBuilderEnv)
   await execute(['run', 'prepare:packages'], targetEnv)
-  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], targetEnv)
+  await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
   if (target.platform === 'win32') await execute(['run', 'prepare:cli-shim'], targetEnv)
   if (invocation.prepareOnly) return
   // 2026-09-19 coder(lq): unsigned mac uses a single electron-builder pass and skips notarized ZIP/DMG wrapping.
-  if (target.platform === 'darwin' && !invocation.directory && !invocation.unsigned) {
+  if (target.platform === 'darwin' && invocation.unsigned) {
+    await execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv)
+    await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts', '--unsigned'], targetEnv)
+  } else if (target.platform === 'darwin' && !invocation.directory) {
     await execute([
       ...desktopElectronBuilderArguments(target, true),
       '--config.mac.notarize=false',
     ], electronBuilderEnv)
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
-    await withMacOSNotarizationProxy(mac?.notarizationProxy, () => packageMacOSArtifacts({
+    await withMacOSNotarizationProxyIfNeeded(mac?.notarizationProxy, () => packageMacOSArtifacts({
       arch: target.arch,
       // electron-builder named these artifacts after the published version, so locating them uses the same identifier.
       version: resolveDesktopBuildVersion(environment, packageVersion(join(APP_ROOT, 'package.json'), 'desktop package')),
       artifactsRoot: buildPaths.artifacts,
       environment: electronBuilderEnv,
-    }, artifact => execute(desktopElectronBuilderArguments(target, false, artifact), electronBuilderEnv)), undefined, undefined, proxyEvent)
+    }, artifact => execute(desktopElectronBuilderArguments(target, false, artifact), electronBuilderEnv)), proxyEvent)
   } else if (target.platform === 'darwin') {
     await execute([...desktopElectronBuilderArguments(target, true), '--config.mac.notarize=false'], electronBuilderEnv)
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts'], targetEnv)
     const appPath = join(buildPaths.artifacts, target.arch === 'arm64' ? 'mac-arm64' : 'mac', 'DeepSeek Harness.app')
-    await withMacOSNotarizationProxy(mac?.notarizationProxy,
-      () => notarizeMacOS({ appPath, ...resolveMacOSNotarizationEnvironment(environment) }), undefined, undefined, proxyEvent)
+    await withMacOSNotarizationProxyIfNeeded(mac?.notarizationProxy,
+      () => notarizeMacOS({ appPath, ...resolveMacOSNotarizationEnvironment(environment) }), proxyEvent)
   } else {
     await signedStage('artifacts', () => execute(desktopElectronBuilderArguments(target, invocation.directory), electronBuilderEnv))
     await execute(['exec', 'tsx', 'scripts/smoke-packaged-runtime.ts', ...(invocation.unsigned ? ['--unsigned'] : [])], targetEnv)
