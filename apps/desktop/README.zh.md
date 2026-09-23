@@ -424,3 +424,5 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 上线前 CDN 与容量决策见[桌面更新提案](../../.agents/notes/proposed/feature/2026-09-08-desktop-update-policy-and-installation.zh.md#cdn-and-capacity-qualification)。
 
 内置 CLI 包含 [Multica / MissionOS profile](../cli/README.zh.md#multica--missionos)。准备后的运行时及打包后的 ASAR 冒烟检查均要求通过探测、模型列表和 JSONL 启动验证。
+
+[Windows Office 诊断工作流](../../.github/workflows/diagnose-windows-office.yml) 在 Electron 外隔离原生 DOCX、XLSX 和 PPTX 转换，对比短路径与打包长度路径。它仅用于诊断；安装包冒烟检查和 Release 发布仍是独立要求。
