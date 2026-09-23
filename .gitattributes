@@ -17,3 +17,6 @@ docs/persistence-schema.json linguist-generated=true
 docs/persistence-changes/*.schema.json linguist-generated=true
 docs/persistence-changes/releases/*.schema.json linguist-generated=true
 docs/persistence-changes/historical-formats/*.schema.json linguist-generated=true
+
+# Unified diff context prefixes legitimately precede upstream tab indentation.
+patches/@deepseek-ai__libreoffice-kit@0.0.1.patch whitespace=-space-before-tab

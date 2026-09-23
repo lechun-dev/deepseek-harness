@@ -12,7 +12,7 @@ const converter = await createConverter()
 console.log(JSON.stringify({ platform: process.platform, node: process.version, backend: converter.backend, entry, pathLength: entry.length }))
 let failed = false
 try {
-  if (process.env.DIAGNOSTIC_LAYOUT === 'junction-short') {
+  if (['junction-short', 'patched'].includes(process.env.DIAGNOSTIC_LAYOUT)) {
     const inputPath = resolve(fixtures, 'invalid.docx')
     const outputPath = resolve(fixtures, 'invalid.pdf')
     await writeFile(inputPath, 'not an Office document')

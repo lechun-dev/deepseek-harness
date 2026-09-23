@@ -185,7 +185,7 @@ macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS �
 
 Desktop 在本地打包工作区包，并通过目标捆绑的 Node 和 pnpm 安装外部依赖。[Desktop 文件策略](scripts/runtime-file-policy.ts)随后在签名和完整性封装前过滤不可变的 `resources/app.asar/dsh/node_modules` 副本。它排除 TypeScript 声明、已识别的 JavaScript/CSS/TypeScript source map、TypeScript 构建缓存、Domino 测试目录、选定的原生编译器输出和其他平台的 node-pty 预构建文件。它保留运行时 JavaScript、原生模块及其 DLL/EXE 辅助文件、WASM、未知资源、许可证和 notices。依赖清单在完整性封装前经过 electron-builder 的元数据清理，确保归档保持已记录的字节。该策略不修改 npm tarball、捆绑的包管理器或用户安装的插件文件。
 
-[Office 转换提供方](../../packages/document/office-to-pdf/README.zh.md)携带目标已声明的原生引擎；kit 未声明匹配原生目标时携带 WASM 引擎。准备阶段在打包前拒绝缺少目标引擎的情况。完整原生引擎包（包括可执行文件、库、数据、许可证和 notices）解包到 `resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai/` 下。Desktop Host 将引擎清单解析到这些物理目录，使原生子进程能读取资源；JavaScript API 和 WASM 引擎保留在 ASAR 中。macOS 上的原生辅助程序获得 [LibreOffice UNO 桥](https://github.com/LibreOffice/core/blob/master/sysui/desktop/macosx/hardened_runtime.xcent.in)所需的 JIT entitlement。
+[Office 转换提供方](../../packages/document/office-to-pdf/README.zh.md)携带目标已声明的原生引擎；kit 未声明匹配原生目标时携带 WASM 引擎。准备阶段在打包前拒绝缺少目标引擎的情况。完整原生引擎包（包括可执行文件、库、数据、许可证和 notices）解包到 `resources/app.asar.unpacked/dsh/node_modules/@deepseek-ai/` 下。Desktop Host 将引擎清单解析到这些物理目录，使原生子进程能读取资源；JavaScript API 和 WASM 引擎保留在 ASAR 中。macOS 上的原生辅助程序获得 [LibreOffice UNO 桥](https://github.com/LibreOffice/core/blob/master/sysui/desktop/macosx/hardened_runtime.xcent.in)所需的 JIT entitlement。 Windows 上每次原生转换通过私有临时目录联接访问物理引擎根目录，以避开过长的安装路径。辅助程序退出后（包括失败和取消）会解除联接，不删除已安装的资源。临时目录必须可写且路径较短；过长的自定义 TEMP 路径仍可能超出引擎路径限制。
 
 打包应用运行编译后的 JavaScript 和预生成的 Typert 元数据，不编译 TypeScript 插件。源码级调试导航和编辑器声明仍可从开发包中获取。[复制规则测试](tests/runtime-file-policy.spec.ts)覆盖排除项和保留资源；[产物 smoke](tests/fixtures/runtime-payload-smoke.mjs) 在 Host smoke 和最终清单验证之前，使用 Electron RunAsNode 执行。产物 smoke 解析搜索工具使用的 ripgrep 可执行文件，并验证文本搜索和文件枚举。Windows 签名构建在依赖签名后运行这些检查；其他构建在 `prepare:dsh` 中运行。[Host smoke](scripts/smoke-runtime.ts) 使用捆绑的 Python 创建 DOCX、XLSX 和 PPTX 输入，通过真实 Office 提供方逐一转换并检查 PDF 输出。每个组装后的应用（包括目录包和 Windows 未签名构建）都会针对 ASAR 重复产物和 Host 检查。归档完整性检查将归档内完整描述符与准备结果比对，并核对归档和解包目录中的文件内容与清单、归档内文件记录的执行标志，以及解包文件的物理权限。转换失败会在写入发布记录前终止打包；macOS DMG/ZIP 构建在公证前执行这些检查。
 
@@ -425,4 +425,4 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 
 内置 CLI 包含 [Multica / MissionOS profile](../cli/README.zh.md#multica--missionos)。准备后的运行时及打包后的 ASAR 冒烟检查均要求通过探测、模型列表和 JSONL 启动验证。
 
-[Windows Office 诊断工作流](../../.github/workflows/diagnose-windows-office.yml) 在 Electron 外隔离原生 DOCX、XLSX 和 PPTX 转换，对比短路径、打包长度路径、等长普通路径，以及复制到短路径后的同一份长路径安装。仅用于诊断的目录联接探针保留长路径安装，在每次转换的私有临时目录中为原生引擎路径创建别名；它在有效文档转换前检查清理及无效文档拒绝行为。它仅用于诊断；安装包冒烟检查和 Release 发布仍是独立要求。
+[Windows Office 诊断工作流](../../.github/workflows/diagnose-windows-office.yml) 在 Electron 外隔离原生 DOCX、XLSX 和 PPTX 转换，对比短路径、打包长度路径、等长普通路径，以及复制到短路径后的同一份长路径安装。仅用于诊断的目录联接探针保留长路径安装，在每次转换的私有临时目录中为原生引擎路径创建别名；它在有效文档转换前检查清理及无效文档拒绝行为。它仅用于诊断；安装包冒烟检查和 Release 发布仍是独立要求。 patched 布局将随产品交付的依赖补丁应用到长路径安装，并执行别名生命周期测试及相同的真实转换。

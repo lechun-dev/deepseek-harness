@@ -1,8 +1,13 @@
 diff --git a/lib/index.js b/lib/index.js
-index 327b423cce9e6f9e54c57e5a481416885e8bf557..1526fd0b0e4bbe0057f484025299f1832e3cc0d6 100644
+index 327b423cce9e6f9e54c57e5a481416885e8bf557..b63ab941f4ed2c3974c778a13374134cac8a2d4f 100644
 --- a/lib/index.js
 +++ b/lib/index.js
-@@ -627,11 +627,14 @@ function platformTarget(platform = process.platform, arch = process.arch, report
+@@ -1,3 +1,4 @@
++import { withNativeEngineAlias } from "./native-paths.js";
+ import { createRequire } from "node:module";
+ import { constants, lstatSync, readdirSync } from "node:fs";
+ import { mkdir, mkdtemp, open, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+@@ -627,11 +628,14 @@ function platformTarget(platform = process.platform, arch = process.arch, report
  function hostReport() {
  	return process.report.getReport();
  }
@@ -18,3 +23,86 @@ index 327b423cce9e6f9e54c57e5a481416885e8bf557..1526fd0b0e4bbe0057f484025299f183
  }
  function glibcVersion(value) {
  	return typeof value === "string" && /^(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/.test(value) && value.split(".").every((part) => Number.isSafeInteger(Number(part))) ? value.split(".").map(Number) : void 0;
+@@ -675,7 +679,7 @@ async function engineAsset(root, value, name, kind) {
+ 	return path;
+ }
+ async function readEngine(packageFile, backend, target) {
+-	const root = dirname(packageFile);
++	const root = physicalAsarPath(dirname(packageFile));
+ 	const [pkg, manifest] = await Promise.all([readFile(packageFile, "utf8").then((text) => JSON.parse(text)), readFile(resolve(root, "prebuilds.json"), "utf8").then((text) => JSON.parse(text))]);
+ 	const engine = manifest.engine;
+ 	if (pkg.name !== `${ENGINE_PREFIX}-${target}` || pkg.version !== "0.0.1" || manifest.version !== pkg.version || manifest.schemaVersion !== 1 || manifest.status !== "built" || engine === void 0 || engine.kind !== backend || manifest.platform !== target) throw new Error(`Installed LibreOfficeKit ${backend} package has an incompatible or incomplete manifest.`);
+@@ -865,7 +869,11 @@ async function createConverter(options) {
+ 				const profile = join(scratch, "profile");
+ 				await mkdir(profile, { mode: 448 });
+ 				const path = join(scratch, "document.pdf");
+-				await runNative(native, resolvedOptions, inputPath, path, profile, result.fonts, result.substitutions, stopped);
++				if (process.platform === "win32") {
++					await withNativeEngineAlias(native, (aliased) => runNative(aliased, resolvedOptions, inputPath, path, profile, result.fonts, result.substitutions, stopped));
++				} else {
++					await runNative(native, resolvedOptions, inputPath, path, profile, result.fonts, result.substitutions, stopped);
++				}
+ 				pdf = await readBounded(path, resolvedOptions.maxOutputBytes, stopped, "output");
+ 			}
+ 			if (Buffer.from(pdf.subarray(0, 5)).toString() !== "%PDF-") throw new ConversionError("invalid-output", "LibreOffice did not produce a PDF.");
+diff --git a/lib/native-paths.js b/lib/native-paths.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..b576f899e4016510c29df299b3635f1b3ef0b5ee
+--- /dev/null
++++ b/lib/native-paths.js
+@@ -0,0 +1,41 @@
++import { lstat, mkdtemp, rmdir, symlink, unlink } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join, relative } from "node:path";
++
++/**
++ * Runs a native conversion through a conversion-owned engine junction.
++ * The operation must settle only after its helper exits. Cleanup never recursively
++ * removes the alias or the installed engine, including on cancellation or failure.
++ * @param engine Physical installed native engine paths.
++ * @param operation Async operation consuming the aliased paths.
++ * @returns The operation result after alias cleanup.
++ */
++export async function withNativeEngineAlias(engine, operation) {
++  const directory = await mkdtemp(join(tmpdir(), "lok-"));
++  const alias = join(directory, "e");
++  let linked = false;
++  let failure;
++  try {
++    await symlink(engine.root, alias, "junction");
++    linked = true;
++    return await operation({
++      ...engine,
++      root: alias,
++      programDirectory: join(alias, relative(engine.root, engine.programDirectory)),
++      executable: join(alias, relative(engine.root, engine.executable)),
++    });
++  } catch (error) {
++    failure = error;
++    throw error;
++  } finally {
++    try {
++      if (linked) {
++        if (!(await lstat(alias)).isSymbolicLink()) throw new Error("Native engine alias is no longer a link.");
++        await unlink(alias);
++      }
++      await rmdir(directory);
++    } catch (error) {
++      throw new AggregateError(failure === undefined ? [error] : [failure, error], "Native engine alias cleanup failed.");
++    }
++  }
++}
+diff --git a/package.json b/package.json
+index f2380dd4a6f2bde1030c24b09fd8248a0de7ea24..62fc4cc61a06d133453d4d8bd1ddc5e2626b142f 100644
+--- a/package.json
++++ b/package.json
+@@ -29,7 +29,8 @@
+     "lib/index.js",
+     "lib/worker.js",
+     "NOTICE",
+-    "lib/types/**/*.d.ts"
++    "lib/types/**/*.d.ts",
++    "lib/native-paths.js"
+   ],
+   "dependencies": {
+     "fflate": "0.8.2",
