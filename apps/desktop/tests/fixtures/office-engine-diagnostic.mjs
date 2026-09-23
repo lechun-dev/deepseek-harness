@@ -1,6 +1,6 @@
 /** Run real Office fixtures against a separately installed engine, without Electron or ASAR. */
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -12,6 +12,14 @@ const converter = await createConverter()
 console.log(JSON.stringify({ platform: process.platform, node: process.version, backend: converter.backend, entry, pathLength: entry.length }))
 let failed = false
 try {
+  if (process.env.DIAGNOSTIC_LAYOUT === 'junction-short') {
+    const inputPath = resolve(fixtures, 'invalid.docx')
+    const outputPath = resolve(fixtures, 'invalid.pdf')
+    await writeFile(inputPath, 'not an Office document')
+    await assert.rejects(converter.render({ inputPath, outputPath }))
+    await assert.rejects(readFile(outputPath), { code: 'ENOENT' })
+    console.log('Invalid DOCX rejected; partial output removed')
+  }
   for (const extension of ['docx', 'xlsx', 'pptx']) {
     const outputPath = resolve(fixtures, `output.${extension}.pdf`)
     try {

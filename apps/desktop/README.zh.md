@@ -425,4 +425,4 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 
 内置 CLI 包含 [Multica / MissionOS profile](../cli/README.zh.md#multica--missionos)。准备后的运行时及打包后的 ASAR 冒烟检查均要求通过探测、模型列表和 JSONL 启动验证。
 
-[Windows Office 诊断工作流](../../.github/workflows/diagnose-windows-office.yml) 在 Electron 外隔离原生 DOCX、XLSX 和 PPTX 转换，对比短路径、打包长度路径、等长普通路径，以及复制到短路径后的同一份长路径安装。它仅用于诊断；安装包冒烟检查和 Release 发布仍是独立要求。
+[Windows Office 诊断工作流](../../.github/workflows/diagnose-windows-office.yml) 在 Electron 外隔离原生 DOCX、XLSX 和 PPTX 转换，对比短路径、打包长度路径、等长普通路径，以及复制到短路径后的同一份长路径安装。仅用于诊断的目录联接探针保留长路径安装，在每次转换的私有临时目录中为原生引擎路径创建别名；它在有效文档转换前检查清理及无效文档拒绝行为。它仅用于诊断；安装包冒烟检查和 Release 发布仍是独立要求。

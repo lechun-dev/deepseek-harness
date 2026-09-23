@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/diagnose-windows-office.yml
       - apps/desktop/tests/fixtures/office-engine-diagnostic.mjs
+      - apps/desktop/tests/fixtures/office-engine-junction-probe.mjs
   workflow_dispatch:
 
 permissions:
@@ -18,14 +19,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        layout: [short, packaged, neutral-long, relocated-short]
+        layout: [short, packaged, neutral-long, relocated-short, junction-short]
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version: '24.20.0'
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -53,6 +54,10 @@ jobs:
               $relocated = Join-Path $scratch 'app'
               Copy-Item -LiteralPath $root -Destination $relocated -Recurse
               $root = $relocated
+            }
+            if ($env:DIAGNOSTIC_LAYOUT -eq 'junction-short') {
+              node apps/desktop/tests/fixtures/office-engine-junction-probe.mjs $root
+              if ($LASTEXITCODE -ne 0) { throw 'Native junction probe installation failed' }
             }
             Write-Host "Office layout=$env:DIAGNOSTIC_LAYOUT rootLength=$($root.Length) root=$root"
             python -m venv (Join-Path $scratch 'python')
