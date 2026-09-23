@@ -57,6 +57,7 @@ jobs:
           DOWNLOAD_TEST_ORIGIN=https://example.invalid
           DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=https://example.invalid
           DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
+          DSH_DESKTOP_MANDATORY_UPDATE_CONFIG={"allowedAuthOrigins":["https://login.example.com"]}
           DSH_DESKTOP_MACOS_SIGNING_IDENTITY=
           DSH_DESKTOP_MACOS_TEAM_ID=
           CSC_LINK=
@@ -72,6 +73,7 @@ jobs:
           DSH_DESKTOP_AUTO_UPDATE_ENV=test
           DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=https://example.invalid
           DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=https://harness.deepseek.com
+          DSH_DESKTOP_MANDATORY_UPDATE_CONFIG={"allowedAuthOrigins":["https://login.example.com"]}
           '@ | Set-Content -Path apps/desktop/.env.windows -Encoding utf8NoBOM
 
       - name: Package unsigned desktop target
