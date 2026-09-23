@@ -1,0 +1,20 @@
+diff --git a/lib/index.js b/lib/index.js
+index 327b423cce9e6f9e54c57e5a481416885e8bf557..1526fd0b0e4bbe0057f484025299f1832e3cc0d6 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -627,11 +627,14 @@ function platformTarget(platform = process.platform, arch = process.arch, report
+ function hostReport() {
+ 	return process.report.getReport();
+ }
++function physicalAsarPath(path) {
++	return path.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`);
++}
+ function asset(root, value) {
+ 	if (typeof value !== "string" || !value || isAbsolute(value)) throw new Error("Engine manifest contains an invalid asset path.");
+ 	const path = resolve(root, value);
+ 	if (relative(root, path).startsWith(`..${sep}`) || relative(root, path) === "..") throw new Error("Engine asset escapes its installed package.");
+-	return path;
++	return physicalAsarPath(path);
+ }
+ function glibcVersion(value) {
+ 	return typeof value === "string" && /^(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/.test(value) && value.split(".").every((part) => Number.isSafeInteger(Number(part))) ? value.split(".").map(Number) : void 0;
