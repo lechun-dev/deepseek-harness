@@ -17,7 +17,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import * as AppBoot from '@deepseek-ai/dsh-app-boot'
 import { createLaunchEnvironmentSnapshot, DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
+import type { IndexInjection, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { apply, Config, internals } from '../src/index.ts'
 
 vi.mock('node:child_process', async importOriginal => ({
@@ -73,7 +73,7 @@ function stageDist(): string {
 /** A fake webServer capturing the fallback seat and index taps. */
 function fakeHttpServer(
   host: '127.0.0.1' | '0.0.0.0' = '127.0.0.1',
-  injections: readonly unknown[] = [],
+  injections: readonly IndexInjection[] = [],
 ): { server: WebServer; seat: () => unknown } {
   let fallback: unknown
   const server = {
@@ -85,7 +85,7 @@ function fakeHttpServer(
     },
     renderIndex: (html: string) => html,
     collectIndexInjections: () => [...injections],
-  } as unknown as WebServer
+  } satisfies Pick<WebServer, 'host' | 'port' | 'registerFallback' | 'renderIndex' | 'collectIndexInjections'> as WebServer
   return { server, seat: () => fallback }
 }
 

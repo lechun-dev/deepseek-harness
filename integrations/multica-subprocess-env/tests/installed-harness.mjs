@@ -31,9 +31,9 @@ export function candidateRoots() {
  */
 export function installedHarnessRoot() {
   return candidateRoots().find(candidate =>
-    existsSync(join(candidate, 'cordis', 'lib', 'index.js'))
+    existsSync(join(dirname(candidate), '@deepseek-ai/cordis/lib/index.js'))
     && existsSync(join(candidate, 'dsh-subprocess-local', 'lib', 'index.js'))
-    && existsSync(join(candidate, 'cordis-plugin-loader', 'lib', 'index.js')))
+    && existsSync(join(dirname(candidate), '@deepseek-ai/cordis-plugin-loader/lib/index.js')))
 }
 
 /** Skip message shared by the real-harness suites. */
