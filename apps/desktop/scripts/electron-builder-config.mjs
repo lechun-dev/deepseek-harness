@@ -223,6 +223,11 @@ export function createElectronBuilderConfig(
     win: {
       icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
       forceCodeSigning: !unsigned,
+      // electron-builder signs every .exe under app.asar.unpacked after packaging.
+      // The unsigned Windows smoke test runs after NSIS is built, so leave the
+      // unpacked Office helper binaries byte-for-byte intact while still letting
+      // resedit apply icon/version metadata to the main application executable.
+      signExecutable: !unsigned,
       signtoolOptions: {
         sign: windowsSigner,
         publisherName: windowsSigner === undefined ? undefined : resolveWindowsUpdatePublisher(env.DSH_DESKTOP_WINDOWS_CER_FILE),

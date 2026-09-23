@@ -117,15 +117,16 @@ describe('desktop macOS release signature', () => {
     expect(portablePath(config.directories.output)).toContain('/targets/win-x64/unsigned-artifacts')
     expect(portablePath(config.nsis.include)).toMatch(/\/scripts\/installer\.nsh$/u)
     expect(config).toMatchObject({
-      win: { forceCodeSigning: false, signtoolOptions: { sign: undefined } },
+      win: { forceCodeSigning: false, signExecutable: false, signtoolOptions: { sign: undefined } },
       publish: null,
     })
   })
 
-  it('rejects unsigned macOS builds and malformed signing modes', async () => {
+  it('accepts unsigned macOS packaging and rejects malformed signing modes', async () => {
     const { createElectronBuilderConfig } = await import('../electron-builder.config.mjs')
-    expect(() => createElectronBuilderConfig({ ...RELEASE_ENVIRONMENT, DSH_DESKTOP_UNSIGNED: '1' }))
-      .toThrow(/unsigned builds require Windows/u)
+    const unsigned = createElectronBuilderConfig({ ...RELEASE_ENVIRONMENT, DSH_DESKTOP_UNSIGNED: '1' })
+    expect(unsigned.mac).toMatchObject({ identity: null, forceCodeSigning: false, hardenedRuntime: false, notarize: false })
+    expect(unsigned.dmg.sign).toBe(false)
     expect(() => createElectronBuilderConfig({ ...RELEASE_ENVIRONMENT, DSH_DESKTOP_UNSIGNED: 'yes' }))
       .toThrow(/must be 0 or 1/u)
   })
