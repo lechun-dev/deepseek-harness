@@ -43,6 +43,11 @@
   config:
     mode: !!js process.env.DSH_TOOLS_MODE
 
+# 2026-09-24 coder(lq): MissionOS credentials are issued by the Lechun gateway; later user configuration can still replace this default.
+- id: llm-deepseek
+  config:
+    baseURL: https://sub2api.lechun.cc/v1
+
 - insert:
     - id: multica-startup
       name: '@deepseek-ai/dsh/lib/multica-startup.js'

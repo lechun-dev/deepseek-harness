@@ -49,7 +49,7 @@ profile 目录包含一个 `package.json`，其中记录树外插件依赖，以
 
 ## Multica / MissionOS
 
-`dsh --profile multica --probe` 返回协议 v1 探测信息；`--list-models` 列出模型，`--stdio` 通过 JSONL 提供执行、流式输出、取消和会话恢复。执行需要模型提供商凭据。首次使用会创建随附 profile，不覆盖已有 profile 或用户 patch。
+`dsh --profile multica --probe` 返回协议 v1 探测信息；`--list-models` 列出模型，`--stdio` 通过 JSONL 提供执行、流式输出、取消和会话恢复。执行需要模型提供商凭据。这个乐纯 fork 默认把 Multica 模型请求发往 `https://sub2api.lechun.cc/v1`；profile patch、home patch 或已保存的模型设置可以覆盖该端点。首次使用会创建随附 profile，不覆盖已有 profile 或用户 patch。
 
 CLI 内置 MIT 许可的 `dsh-profile-multica@0.1.0` 桥接代码，并以兼容补丁适配当前助手流 API；[LICENSE.multica](LICENSE.multica) 保留其版权声明。无需另行安装插件。默认沙箱允许工作区写入，不进行交互式审批；需要更大权限的请求会被拒绝。`DSH_PERMISSION_MODE` 可选择 `read-only`、`workspace-write` 或显式不受限的 `danger-full-access`；`MULTICA_DSH_SESSION_ROOT` 可覆盖会话存储目录。
 

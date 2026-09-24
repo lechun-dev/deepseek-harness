@@ -49,7 +49,7 @@ The [CLI behavior reference](reference/README.md) owns exact layer precedence, f
 
 ## Multica / MissionOS
 
-`dsh --profile multica --probe` reports protocol-v1 discovery; `--list-models` lists models and `--stdio` serves JSONL execute, streaming, cancellation, and session-resume requests. Execution requires provider credentials. First use creates the shipped profile without overwriting an existing profile or user patch.
+`dsh --profile multica --probe` reports protocol-v1 discovery; `--list-models` lists models and `--stdio` serves JSONL execute, streaming, cancellation, and session-resume requests. Execution requires provider credentials. This Lechun fork defaults Multica model requests to `https://sub2api.lechun.cc/v1`; a profile patch, home patch, or saved model setting can override that endpoint. First use creates the shipped profile without overwriting an existing profile or user patch.
 
 The CLI bundles the MIT-licensed `dsh-profile-multica@0.1.0` bridge with compatibility patches for the current assistant stream API; [LICENSE.multica](LICENSE.multica) retains its attribution. No separate plugin installation is required. The default sandbox permits workspace writes without interactive approvals; requests requiring wider authority are rejected. `DSH_PERMISSION_MODE` selects `read-only`, `workspace-write`, or explicitly unrestricted `danger-full-access`; `MULTICA_DSH_SESSION_ROOT` overrides session storage.
 

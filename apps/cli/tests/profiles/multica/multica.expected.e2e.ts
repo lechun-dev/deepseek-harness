@@ -16,7 +16,7 @@ it('discovers, streams, executes and resumes the bundled multica profile', async
   try {
     server = await startMockLlmServer({ sequence: ['reasoning_success', 'reasoning_success', 'slow_success'], chunkDelayMs: 1000, chunkSize: 1, reasoningText: 'Checking', apiKey: 'multica-test', successText: 'MULTICA OK' })
     const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1',
-      DEEPSEEK_API_KEY: 'multica-test', DEEPSEEK_BASE_URL: server.baseURL, DSH_PERMISSION_MODE: 'danger-full-access' }
+      DEEPSEEK_API_KEY: 'multica-test', DSH_PERMISSION_MODE: 'danger-full-access' }
     const probe = await execa(process.execPath, [bin, '--profile', 'multica', '--probe'], { env, timeout: 60_000 })
     expect(JSON.parse(probe.stdout)).toEqual({ v: 1, type: 'probe', runtime: 'dsh', plugin_version: '0.1.0', protocol_version: 1 })
     expect(probe.stderr).toBe('')
@@ -25,7 +25,7 @@ it('discovers, streams, executes and resumes the bundled multica profile', async
     expect(catalog).toMatchObject({ v: 1, type: 'models' })
     expect(Array.isArray(catalog.models)).toBe(true)
     const patch = join(home, 'profiles', 'multica', 'cordis.patch.yml')
-    const customPatch = '- id: session-title-llm\n  disabled: true\n'
+    const customPatch = `- id: session-title-llm\n  disabled: true\n- id: llm-deepseek\n  config:\n    baseURL: ${server.baseURL}\n`
     writeFileSync(patch, customPatch)
     let session: string | undefined
     for (const requestId of ['fresh', 'resume', 'cancel']) {
