@@ -26,14 +26,17 @@ jobs:
             runner: macos-latest
             package-script: package:mac:arm64:unsigned
             artifact-name: dsh-desktop-mac-arm64-unsigned
+            artifact-pattern: '*.dmg'
           - target: mac-x64
             runner: macos-15-intel
             package-script: package:mac:x64:unsigned
             artifact-name: dsh-desktop-mac-x64-unsigned
+            artifact-pattern: '*.dmg'
           - target: win-x64
             runner: windows-2025
             package-script: package:win:x64:unsigned
             artifact-name: dsh-desktop-win-x64-unsigned
+            artifact-pattern: '*.exe'
 
     steps:
       - uses: actions/checkout@v6
@@ -93,8 +96,11 @@ jobs:
         shell: pwsh
         run: |
           $artifactDir = "apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts"
-          Get-ChildItem -Path $artifactDir -File | Where-Object { $_.Extension -ine '.exe' } | Remove-Item -Force
-          Get-ChildItem -Path $artifactDir -File | ForEach-Object { $_.FullName }
+          # 2026-09-24 coder(lq): electron-builder needs an unpacked staging tree, but release artifacts only retain installers.
+          Get-ChildItem -Path $artifactDir | Where-Object { $_.PSIsContainer -or $_.Extension -ine '.exe' } | Remove-Item -Recurse -Force
+          $installers = @(Get-ChildItem -Path $artifactDir -File -Filter '*.exe')
+          if ($installers.Count -eq 0) { throw "No Windows installer was produced in $artifactDir" }
+          $installers | ForEach-Object { $_.FullName }
 
       # Packaging already packs every dsh and vendored tarball for its own
       # runtime; uploading that same set makes one run yield an installable CLI,
@@ -183,5 +189,5 @@ jobs:
         with:
           name: ${{ matrix.artifact-name }}
           if-no-files-found: error
-          path: apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/*
+          path: apps/desktop/.desktop-build/targets/${{ matrix.target }}/unsigned-artifacts/${{ matrix.artifact-pattern }}
           retention-days: 14
