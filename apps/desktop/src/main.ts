@@ -50,7 +50,9 @@ import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.t
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
 import {
+  ensureCliLauncher,
   installCliLauncher,
+  isCliLauncherCurrent,
   readCliLauncher,
   removeCliLauncher,
   systemCliLauncherOperations,
@@ -63,6 +65,22 @@ let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
 let shuttingDown = false
 let windowsLanguage: string | undefined
+
+/** Where this packaged application's user-level `dsh` launcher lives. */
+function commandLineToolEnvironment(): CliLauncherEnvironment | undefined {
+  if (!app.isPackaged) return undefined
+  return {
+    version: app.getVersion(),
+    platform: process.platform,
+    executable: process.execPath,
+    cliEntry: join(app.getAppPath(), 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    pathEntries: (process.env.PATH ?? '').split(delimiter),
+    stateFile: join(app.getPath('userData'), 'cli-launcher.json'),
+    ...(process.platform === 'win32'
+      ? { shimSource: join(process.resourcesPath, 'cli-shim', 'dsh.exe') }
+      : {}),
+  }
+}
 /**
  * Whether the backend has reached ready: false until the first ready, back to
  * false when a restart returns it to starting, frozen during shutdown so a
@@ -827,23 +845,6 @@ async function main(): Promise<void> {
       { role: 'hideOthers', label: currentDesktopLocale().messages.hideOtherApplications },
       { role: 'unhide', label: currentDesktopLocale().messages.showAllApplications }, { type: 'separator' }]
     : []
-  /** Where this application's machine-wide `dsh` launcher lives; absent outside a packaged app. */
-  const commandLineToolEnvironment = (): CliLauncherEnvironment | undefined => {
-    if (!app.isPackaged) return undefined
-    return {
-      version: app.getVersion(),
-      platform: process.platform,
-      executable: process.execPath,
-      cliEntry: join(app.getAppPath(), 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-      // `delimiter` is this platform's own PATH separator: ':' on macOS, ';' on Windows.
-      pathEntries: (process.env.PATH ?? '').split(delimiter),
-      stateFile: join(app.getPath('userData'), 'cli-launcher.json'),
-      // Windows needs a real executable: `CreateProcess` cannot run the `.cmd` a shell accepts.
-      ...(process.platform === 'win32'
-        ? { shimSource: join(process.resourcesPath, 'cli-shim', 'dsh.exe') }
-        : {}),
-    }
-  }
   const commandLinePromptMarker = (): string => join(app.getPath('userData'), 'cli-launcher-prompted')
 
   /** Extra lines the install result carries: what it replaced, what shadows it, and whether MissionOS can register it. */
@@ -891,8 +892,23 @@ async function main(): Promise<void> {
     const operations = systemCliLauncherOperations()
     const text = currentDesktopLocale().messages
     const installed = readCliLauncher(environment, operations)
+    if (!manual && environment.platform === 'win32') {
+      // 2026-09-24 coder(lq): MissionOS launches dsh without opening this menu,
+      // so Windows startup must repair missing shim/config/state files itself.
+      const result = await ensureCliLauncher(environment, operations)
+      if (result.status === 'no-directory' || result.status === 'unavailable') {
+        console.error(`Unable to maintain the dsh launcher: ${result.status}`)
+      }
+      applyApplicationMenu()
+      return
+    }
     if (installed !== undefined) {
-      if (!manual) return
+      if (!manual && isCliLauncherCurrent(environment, operations, installed)) return
+      if (!manual) {
+        await ensureCliLauncher(environment, operations)
+        applyApplicationMenu()
+        return
+      }
       const answer = await ordinaryMessageBox({ type: 'question', title: text.commandLineTitle,
         message: formatDesktopMessage(text.commandLineInstalled, { path: installed.path, version: installed.version }),
         buttons: [text.commandLineRemoveMenu, text.later], defaultId: 1, cancelId: 1 })
@@ -1257,9 +1273,37 @@ async function main(): Promise<void> {
   })
 }
 
-const ownsDesktopInstance = claimDesktopSingleInstance(app, () => { focusPrimaryWindow() })
+/** Run the installer/uninstaller's non-interactive launcher maintenance mode. */
+async function runCliLauncherMaintenance(action: 'install' | 'remove'): Promise<void> {
+  const environment = commandLineToolEnvironment()
+  if (environment === undefined) throw new Error('Command line launcher maintenance requires a packaged application')
+  const operations = systemCliLauncherOperations()
+  if (action === 'remove') {
+    const result = removeCliLauncher(environment, operations)
+    if (result.status === 'unavailable') throw new Error(`Could not remove the command line launcher at ${result.path}`)
+    return
+  }
+  const result = await ensureCliLauncher(environment, operations)
+  if (result.status === 'no-directory') throw new Error('No writable WindowsApps directory is available on PATH')
+  if (result.status === 'unavailable') throw new Error(`The command line launcher at ${result.path} did not start`)
+}
 
-if (ownsDesktopInstance) void app.whenReady().then(main).catch(async (error: unknown) => {
+const launcherMaintenance = process.argv.includes('--install-cli-launcher')
+  ? 'install'
+  : process.argv.includes('--remove-cli-launcher') ? 'remove' : undefined
+const ownsDesktopInstance = launcherMaintenance === undefined
+  ? claimDesktopSingleInstance(app, () => { focusPrimaryWindow() })
+  : false
+
+if (launcherMaintenance !== undefined) {
+  void app.whenReady().then(async () => {
+    await runCliLauncherMaintenance(launcherMaintenance)
+    app.exit(0)
+  }).catch((error: unknown) => {
+    console.error(error)
+    app.exit(1)
+  })
+} else if (ownsDesktopInstance) void app.whenReady().then(main).catch(async (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   console.error(error)
   const diagnosticFile = process.env.DSH_DESKTOP_DIAGNOSTIC_FILE

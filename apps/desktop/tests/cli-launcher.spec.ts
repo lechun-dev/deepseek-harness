@@ -10,7 +10,9 @@ import {
   cliLauncherName,
   cliLauncherDirectories,
   cliLauncherScript,
+  ensureCliLauncher,
   installCliLauncher,
+  isCliLauncherCurrent,
   readCliLauncher,
   removeCliLauncher,
   type CliLauncherEnvironment,
@@ -37,6 +39,10 @@ class FakeOperations implements CliLauncherOperations {
   isWritableDirectory(path: string): boolean { return this.writable.has(path) }
   readLink(path: string): string | undefined { return this.links.get(path) }
   readFile(path: string): string | undefined { return this.files.get(path) }
+  sameFile(first: string, second: string): boolean {
+    const firstContents = this.files.get(first)
+    return firstContents !== undefined && firstContents === this.files.get(second)
+  }
 
   writeFile(path: string, contents: string, mode: number): void {
     this.files.set(path, contents)
@@ -216,6 +222,25 @@ describe('Windows launcher', () => {
     expect(result.status === 'installed' && result.probe).toBe('dsh')
   })
 
+  it('repairs an orphaned bundled shim without preserving the broken copy', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
+    operations.directories.add(alias)
+    operations.writable.add(alias)
+    operations.files.set(shim, 'MZ bundled shim')
+    operations.files.set(`${alias}\\dsh.exe`, 'MZ bundled shim')
+    const env = windowsEnvironment({ shimSource: shim })
+
+    const result = await ensureCliLauncher(env, operations)
+
+    expect(result.status).toBe('installed')
+    expect(operations.renames).toEqual([])
+    expect(operations.files.has(`${alias}\\dsh.exe.${env.version}.bak`)).toBe(false)
+    expect(JSON.parse(operations.files.get(`${alias}\\dsh-shim.json`) ?? '{}')).toMatchObject({ cliEntry: env.cliEntry })
+    expect(readCliLauncher(env, operations)?.configPath).toBe(`${alias}\\dsh-shim.json`)
+  })
+
   it('reports no-directory instead of escalating when the alias directory is read-only', async () => {
     const operations = new FakeOperations()
     const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
@@ -226,6 +251,55 @@ describe('Windows launcher', () => {
     expect(await installCliLauncher(windowsEnvironment(), operations)).toEqual({ status: 'no-directory' })
     expect(operations.privileged).toEqual([])
     expect(operations.files.size).toBe(0)
+  })
+})
+
+describe('ensureCliLauncher', () => {
+  it('keeps a complete current Windows installation unchanged', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
+    operations.directories.add(alias)
+    operations.writable.add(alias)
+    operations.files.set(shim, 'MZ...')
+    const env = windowsEnvironment({ shimSource: shim })
+    await installCliLauncher(env, operations)
+    operations.calls.length = 0
+    operations.copies.length = 0
+
+    expect(isCliLauncherCurrent(env, operations)).toBe(true)
+    expect(await ensureCliLauncher(env, operations)).toEqual({
+      status: 'unchanged', path: `${alias}\\dsh.exe`, version: env.version,
+    })
+    expect(operations.calls).toEqual([])
+    expect(operations.copies).toEqual([])
+  })
+
+  it('reinstalls when the Windows shim config is missing', async () => {
+    const operations = new FakeOperations()
+    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
+    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
+    operations.directories.add(alias)
+    operations.writable.add(alias)
+    operations.files.set(shim, 'MZ...')
+    const env = windowsEnvironment({ shimSource: shim })
+    await installCliLauncher(env, operations)
+    operations.remove(`${alias}\\dsh-shim.json`)
+
+    expect(isCliLauncherCurrent(env, operations)).toBe(false)
+    expect((await ensureCliLauncher(env, operations)).status).toBe('installed')
+    expect(JSON.parse(operations.files.get(`${alias}\\dsh-shim.json`) ?? '{}')).toMatchObject({ executable: env.executable })
+  })
+
+  it('reinstalls when the recorded application version is stale', async () => {
+    const operations = usable()
+    const old = environment({ version: '0.1.5-rc.2' })
+    await installCliLauncher(old, operations)
+    const current = environment()
+
+    expect(isCliLauncherCurrent(current, operations)).toBe(false)
+    expect((await ensureCliLauncher(current, operations)).status).toBe('installed')
+    expect(readCliLauncher(current, operations)?.version).toBe(current.version)
   })
 })
 

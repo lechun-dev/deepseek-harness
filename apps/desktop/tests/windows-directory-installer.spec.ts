@@ -8,6 +8,12 @@ import { directoryInstallerExits, directoryInstallSection, directoryUninstaller 
 const require = createRequire(import.meta.url)
 const section = readFileSync(join(dirname(require.resolve('app-builder-lib/package.json')),
   'templates/nsis/installSection.nsh'), 'utf8')
+const customInstaller = readFileSync(join(import.meta.dirname, '..', 'scripts', 'installer.nsh'), 'utf8')
+
+it('installs and removes the command line launcher with the application', () => {
+  expect(customInstaller).toContain('ExecWait \'"$INSTDIR\\${APP_EXECUTABLE_FILENAME}" --install-cli-launcher\'')
+  expect(customInstaller).toContain('ExecWait \'"$INSTDIR\\${APP_EXECUTABLE_FILENAME}" --remove-cli-launcher\'')
+})
 
 it('keeps data cleanup out of the upstream template while retaining application removal and registration cleanup', () => {
   const source = readFileSync(join(dirname(require.resolve('app-builder-lib/package.json')), 'templates/nsis/uninstaller.nsh'), 'utf8')

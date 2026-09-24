@@ -85,6 +85,8 @@ export interface CliLauncherOperations {
   readLink(path: string): string | undefined
   /** File contents, or undefined when the path is missing. */
   readFile(path: string): string | undefined
+  /** Whether two regular files have identical bytes. */
+  sameFile(first: string, second: string): boolean
   /** Create or replace a regular file at one path with one mode. */
   writeFile(path: string, contents: string, mode: number): void
   /** Create a symlink, replacing any existing entry. */
@@ -259,6 +261,37 @@ export function readCliLauncher(environment: CliLauncherEnvironment, operations:
   return undefined
 }
 
+/**
+ * Whether a recorded launcher still points at this application and has every
+ * file its platform requires.
+ * @param environment - current application paths and version.
+ * @param operations - filesystem operations.
+ * @param state - installation record to validate.
+ * @returns true only when no repair is needed.
+ */
+export function isCliLauncherCurrent(
+  environment: CliLauncherEnvironment,
+  operations: CliLauncherOperations,
+  state: CliLauncherState | undefined = readCliLauncher(environment, operations),
+): boolean {
+  if (state === undefined || state.version !== environment.version) return false
+  if (!operations.exists(state.path) || operations.isDirectory(state.path)) return false
+  if (environment.platform !== 'win32' || environment.shimSource === undefined) {
+    return operations.readFile(state.path) === cliLauncherScript(environment)
+  }
+  if (state.configPath === undefined || !operations.exists(state.configPath)) return false
+  const text = operations.readFile(state.configPath)
+  if (text === undefined) return false
+  try {
+    const value: unknown = JSON.parse(text)
+    if (typeof value !== 'object' || value === null) return false
+    const config = value as Record<string, unknown>
+    return config.executable === environment.executable && config.cliEntry === environment.cliEntry
+  } catch {
+    return false
+  }
+}
+
 /** Persist one installation record. */
 function writeCliLauncherState(environment: CliLauncherEnvironment, operations: CliLauncherOperations, state: CliLauncherState): void {
   operations.writeFile(environment.stateFile, `${JSON.stringify(state, undefined, 2)}\n`, 0o600)
@@ -320,18 +353,30 @@ export async function installCliLauncher(
     return { status: 'unchanged', path, version: environment.version }
   }
 
-  const target = operations.readLink(path)
-  const replaced: CliLauncherReplaced | undefined = target !== undefined
-    ? { kind: 'symlink', target }
-    : operations.exists(path) ? { kind: 'file', backup: `${path}.${environment.version}.bak` } : undefined
-
   // A Windows launcher executable reads its target from this sibling file, so
   // the application can move without rebuilding the shim.
   const configPath = usesShim ? `${directory}${separator}${CLI_LAUNCHER_SHIM_CONFIG}` : undefined
+  const recorded = readCliLauncher(environment, operations)
+  let configOwned = false
+  if (usesShim && configPath !== undefined) {
+    const config = operations.readFile(configPath)
+    configOwned = config?.includes('"executable"') === true && config.includes('"cliEntry"')
+  }
+  // 2026-09-24 coder(lq): A failed upgrade can leave the executable without
+  // its state/config files. Recognize our bundled binary so repair overwrites
+  // that orphan instead of preserving and later restoring a broken launcher.
+  const managed = recorded?.path === path || configOwned
+    || (usesShim && operations.sameFile(path, shimSource))
+  const target = operations.readLink(path)
+  const replaced: CliLauncherReplaced | undefined = managed
+    ? recorded?.replaced
+    : target !== undefined
+      ? { kind: 'symlink', target }
+      : operations.exists(path) ? { kind: 'file', backup: `${path}.${environment.version}.bak` } : undefined
   const shadowedBy = earlierLauncher(environment, operations, directory)
   if (writable !== undefined) {
-    if (replaced?.kind === 'file') operations.rename(path, replaced.backup)
-    else if (replaced !== undefined) operations.remove(path)
+    if (!managed && replaced?.kind === 'file') operations.rename(path, replaced.backup)
+    else if (!managed && replaced !== undefined) operations.remove(path)
     if (usesShim && configPath !== undefined) {
       operations.writeFile(configPath, `${JSON.stringify({ executable: environment.executable, cliEntry: environment.cliEntry }, undefined, 2)}\n`, 0o600)
       operations.copyFile(shimSource, path)
@@ -359,6 +404,28 @@ export async function installCliLauncher(
     ...(shadowedBy === undefined ? {} : { shadowedBy }),
     ...(probe === undefined ? {} : { probe }),
   }
+}
+
+/**
+ * Repair or install the launcher when its record, executable, configuration,
+ * or application version is stale.
+ * @param environment - current application paths and version.
+ * @param operations - filesystem and process operations.
+ * @returns the resulting installation status.
+ */
+export async function ensureCliLauncher(
+  environment: CliLauncherEnvironment,
+  operations: CliLauncherOperations,
+): Promise<CliInstallResult> {
+  const state = readCliLauncher(environment, operations)
+  if (state !== undefined && isCliLauncherCurrent(environment, operations, state)) {
+    return { status: 'unchanged', path: state.path, version: state.version }
+  }
+  if (state !== undefined) {
+    const removed = removeCliLauncher(environment, operations)
+    if (removed.status === 'unavailable') return removed
+  }
+  return installCliLauncher(environment, operations)
 }
 
 /**
@@ -534,6 +601,13 @@ export function systemCliLauncherOperations(): CliLauncherOperations {
         return readFileSync(path, 'utf8')
       } catch {
         return undefined
+      }
+    },
+    sameFile: (first, second) => {
+      try {
+        return readFileSync(first).equals(readFileSync(second))
+      } catch {
+        return false
       }
     },
     writeFile: (path, contents, mode) => { writeFileSync(path, contents, { mode }) },
