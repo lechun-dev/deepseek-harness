@@ -429,4 +429,4 @@ node apps/desktop/node_modules/pnpm/bin/pnpm.mjs --dir apps/desktop run test:upd
 
 [Windows Node 退出诊断](../../.github/workflows/diagnose-windows-node-exit.yml) 使用随包启动器和固定版本的 Electron/pnpm，在独立 Electron 进程中重复执行共享的包脚本冒烟检查 100 次。脚本输出成功标记不能覆盖失败的退出状态。最小夹具不包含 ASAR 和其他载荷依赖，不能替代最终打包产物的冒烟检查。
 
-Electron 主进程 bundle 从已完成的 TypeScript 输出解析 `@deepseek-ai/dsh-home-paths`，不依赖并行生成的工作区 bundle。无法解析的主进程导入会使构建失败；回归测试在未安装开发依赖的环境中加载打包后的桌面路径解析器。runtime 和 Office 冒烟检查不验证正常 GUI 启动。
+Host 构建先完成工作区依赖 bundle，再构建 Electron 桌面壳。主进程 bundle 从 TypeScript 输出解析 `@deepseek-ai/dsh-home-paths`，无法解析的导入会使构建失败。回归测试从空 bundle 目录运行 Host 构建，并在移除仅开发期依赖后加载打包代码。runtime 和 Office 冒烟检查不验证正常 GUI 启动。
