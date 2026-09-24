@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsdown'
+import { desktopMainDependencies } from './scripts/desktop-bundle.ts'
 import { build } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { readFile } from 'node:fs/promises'
@@ -44,7 +45,7 @@ export default defineConfig([
     fixedExtension: false,
     dts: false,
     clean: false,
-    deps: { neverBundle: ['electron'] },
+    ...desktopMainDependencies(fileURLToPath(new URL('../../packages/util/home-paths/lib/types/index.js', import.meta.url))),
   },
   ...(['preload-app', 'preload-welcome', 'preload-platform-account', 'preload-mandatory', 'preload-update-dialog'] as const).map(name => ({
     // Sandboxed Electron preloads run as CommonJS even though the application package is ESM.
