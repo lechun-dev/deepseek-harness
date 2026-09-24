@@ -1,0 +1,47 @@
+name: Diagnose Windows Node exit
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/diagnose-windows-node-exit.yml
+      - apps/desktop/tests/fixtures/windows-node-exit-diagnostic.mjs
+      - apps/desktop/tests/fixtures/runtime-pnpm-smoke.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-exit:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.20.0'
+      - name: Repeat the shipped Electron pnpm node chain
+        shell: pwsh
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory $scratch | Out-Null
+          try {
+            npm install --prefix $scratch --no-audit --no-fund electron@44.0.0 pnpm@11.7.0
+            if ($LASTEXITCODE -ne 0) { throw 'Diagnostic dependency installation failed' }
+            $root = Join-Path $scratch 'apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked'
+            New-Item -ItemType Directory -Force $root | Out-Null
+            Copy-Item "$scratch/node_modules/electron/dist/*" $root -Recurse
+            Rename-Item (Join-Path $root 'electron.exe') 'DeepSeek Harness.exe'
+            $runtime = Join-Path $root 'resources/runtime'
+            New-Item -ItemType Directory -Force $runtime | Out-Null
+            Copy-Item "$scratch/node_modules/pnpm" "$runtime/pnpm" -Recurse
+            Copy-Item 'apps/desktop/scripts/node-bin' "$runtime/bin" -Recurse
+            $executable = Join-Path $root 'DeepSeek Harness.exe'
+            node apps/desktop/tests/fixtures/windows-node-exit-diagnostic.mjs repeat $executable $runtime 100
+            if ($LASTEXITCODE -ne 0) { throw 'Electron pnpm exit diagnostic failed; see per-iteration output' }
+          } finally {
+            Remove-Item -LiteralPath $scratch -Recurse -Force
+          }
