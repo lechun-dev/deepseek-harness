@@ -1,4 +1,5 @@
 /** Lechun endpoint defaults in the shipped MissionOS profile. */
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { describe, expect, it } from 'vitest'
@@ -17,6 +18,14 @@ function endpoint(...laterLayers: ReturnType<typeof loadOverlayPatches>[]): stri
 }
 
 describe('the shipped Multica model endpoint', () => {
+  // 2026-09-30 coder(lq): Guard the package metadata that makes the bundled patch discoverable after upstream merges.
+  it('declares the shipped config as its profile bundle patch', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as {
+      dsh?: { bundle?: { patch?: string } }
+    }
+    expect(manifest.dsh?.bundle?.patch).toBe('./config/multica.yml')
+  })
+
   it('defaults to the Lechun gateway', () => {
     expect(endpoint()).toBe('https://sub2api.lechun.cc/v1')
   })

@@ -162,5 +162,10 @@
     },
     "./lib/*": "./lib/*",
     "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./config/multica.yml"
+    }
   }
 }
