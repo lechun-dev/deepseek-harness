@@ -3,7 +3,13 @@
 import { createServer } from 'node:net'
 import { delimiter, join } from 'node:path'
 import { inspect } from 'node:util'
-import { loadLayeredEnv, loadProfileDirectory, probeWebListen, type WebListenRecord } from '@deepseek-ai/dsh-app-boot'
+import {
+  loadLayeredEnv,
+  loadProfileDirectory,
+  probeWebListen,
+  reportSkippedBundles,
+  type WebListenRecord,
+} from '@deepseek-ai/dsh-app-boot'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -12,17 +18,13 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import * as desktopOffice from './office.ts'
 
 import { installDesktopUpdateTaskControl } from './update-tasks.ts'
+import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
 
-/** Port the Web bundle composes when an invocation names none (`packages/bundle/web-app/cordis.patch.yml`). */
+/** 2026-09-30 coder(lq): port composed by the Web bundle when an invocation does not override it. */
 const WEB_DEFAULT_PORT = 3080
 
-/**
- * Whether this machine's loopback interface binds a port right now.
- * @param port - Loopback port to test.
- * @returns true when the probe bound and released that port.
- */
 function loopbackPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = createServer()
@@ -31,26 +33,14 @@ function loopbackPortAvailable(port: number): Promise<boolean> {
   })
 }
 
-/**
- * Arguments owned by the Desktop-launched Web runner.
- *
- * The Host adopts an already-published service for this Harness home before it
- * boots. With no adoptable sibling, Desktop keeps the Web address every other
- * surface composes by letting the Web server bind its own default port, so the
- * browser, a later `dsh web`, and every tool that knows that address reach the
- * one service this home runs; an occupied port fails that row instead, so the
- * probe then falls back to an OS-assigned loopback port. Electron uses the
- * authenticated URL reported after boot either way.
- * @param available - Whether one loopback port binds right now; tests replace it.
- * @returns the inner arguments for the Desktop Web invocation.
- */
+/** 2026-09-30 coder(lq): prefer the shared Web address, falling back when another home owns the default port. */
 export async function desktopHostWebArgs(
   available: (port: number) => Promise<boolean> = loopbackPortAvailable,
 ): Promise<readonly string[]> {
   return await available(WEB_DEFAULT_PORT) ? ['--no-open'] : ['--no-open', '--port', '0']
 }
 
-/** The parent IPC channel this Host is spawned with; `process` in production. */
+/** 2026-09-30 coder(lq): parent IPC surface used by the packaged Host and isolated adoption tests. */
 export interface DesktopHostChannel {
   readonly connected: boolean
   on(event: 'message', listener: (message: unknown) => void): unknown
@@ -59,18 +49,7 @@ export interface DesktopHostChannel {
   disconnect(): void
 }
 
-/**
- * Report the Web service this Harness home already publishes, then stay alive as
- * the backend handle Electron started.
- *
- * This process boots no Harness: the published service owns the session log, the
- * workspace, and every plugin row, so it is the one surface both the browser and
- * the desktop window talk to. Stopping this child therefore cannot stop that
- * service — nothing here is holding it.
- * @param record - the live service published on this Harness home.
- * @param channel - parent IPC channel to report over.
- * @returns completion once Electron disconnects this child.
- */
+/** 2026-09-30 coder(lq): attach Electron to the Web service already published for this Harness home. */
 export async function adoptPublishedService(
   record: WebListenRecord,
   channel: DesktopHostChannel = process,
@@ -79,11 +58,13 @@ export async function adoptPublishedService(
   channel.on('message', (message: unknown) => {
     if (typeof message !== 'object' || message === null || !('type' in message)) return
     if (message.type === 'shutdown') channel.disconnect()
-    // Answer task control rather than leave the update flow waiting: this child
-    // owns no tasks, and the composer names the adopted service as the owner.
-    if (message.type === 'update-tasks' && 'requestId' in message && Number.isSafeInteger(message.requestId)) {
+    if (!('requestId' in message) || !Number.isSafeInteger(message.requestId)) return
+    if (message.type === 'update-tasks') {
       channel.send?.({ type: 'update-tasks', requestId: message.requestId, active: true,
         error: 'desktop update: the adopted Web service owns this session' }, (error) => { if (error !== null) console.error(error) })
+    } else if (message.type === 'quit-inspection') {
+      channel.send?.({ type: 'quit-inspection', requestId: message.requestId, activeTasks: true, scheduledTasks: true,
+        error: 'desktop quit: the adopted Web service owns this session' }, (error) => { if (error !== null) console.error(error) })
     }
   })
   await new Promise<void>((resolve) => {
@@ -104,6 +85,7 @@ async function main(): Promise<void> {
   }
   const installAnchor = join(runtimeDir, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
   const profile = loadProfileDirectory('dsh', projectDir, installAnchor)
+  reportSkippedBundles('dsh', profile)
   const application = runProfile({
     environment: loadLayeredEnv('dsh'),
     profile: 'desktop',
@@ -123,7 +105,10 @@ async function main(): Promise<void> {
     }),
   })
   let stopping: Promise<void> | undefined
-  const control: { updateTasks?: ReturnType<typeof installDesktopUpdateTaskControl> } = {}
+  const control: {
+    updateTasks?: ReturnType<typeof installDesktopUpdateTaskControl>
+    quitInspection?: ReturnType<typeof installDesktopQuitInspection>
+  } = {}
   const send = (message: object): Promise<void> => new Promise((resolve, reject) => {
     if (!process.connected || process.send === undefined) { resolve(); return }
     process.send(message, (error) => { if (error === null) resolve(); else reject(error) })
@@ -138,6 +123,22 @@ async function main(): Promise<void> {
   process.on('message', (message: unknown) => {
     if (typeof message !== 'object' || message === null || !('type' in message)) return
     if (message.type === 'shutdown') { void stop(); return }
+    if (message.type === 'quit-inspection') {
+      if (!('requestId' in message) || !Number.isSafeInteger(message.requestId)) return
+      const requestId = message.requestId
+      void (async () => {
+        try {
+          if (stopping !== undefined || control.quitInspection === undefined) throw new Error('desktop quit: Host is unavailable')
+          const inspection = await control.quitInspection()
+          await send({ type: 'quit-inspection', requestId, ...inspection })
+        } catch (error) {
+          // The shell treats an unknown state as interruptible work and asks before quitting.
+          await send({ type: 'quit-inspection', requestId, activeTasks: true, scheduledTasks: false,
+            error: error instanceof Error ? error.message : String(error) })
+        }
+      })().catch((error: unknown) => { console.error(error) })
+      return
+    }
     if (message.type !== 'update-tasks' || !('requestId' in message) || !Number.isSafeInteger(message.requestId)
       || !('action' in message) || !['inspect', 'lock', 'unlock'].includes(String(message.action))) return
     void (async () => {
@@ -154,7 +155,9 @@ async function main(): Promise<void> {
   process.once('disconnect', () => { void stop() })
   const { ctx } = await application
   control.updateTasks = installDesktopUpdateTaskControl(ctx)
+  control.quitInspection = installDesktopQuitInspection(ctx)
   await ctx.plugin(desktopOffice, {
+    runtimeDir,
     source: process.argv[4] ?? join(runtimeDir, '..', 'runtime', 'primary-runtime'),
     root: join(resolveDshHome(), 'dsh-runtimes', 'dsh-primary-runtime'),
   })

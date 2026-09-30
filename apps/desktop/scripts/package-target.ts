@@ -487,7 +487,6 @@ export async function packageTarget(
   await execute(['run', 'prepare:packages'], targetEnv)
   await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
-  if (target.platform === 'win32') await execute(['run', 'prepare:cli-shim'], targetEnv)
   if (invocation.prepareOnly) return
   // 2026-09-19 coder(lq): unsigned mac uses a single electron-builder pass and skips notarized ZIP/DMG wrapping.
   if (target.platform === 'darwin' && invocation.unsigned) {

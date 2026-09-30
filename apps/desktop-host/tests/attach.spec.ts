@@ -47,6 +47,12 @@ describe('adoptPublishedService', () => {
       error: 'desktop update: the adopted Web service owns this session',
     })
 
+    channel.emit('message', { type: 'quit-inspection', requestId: 8 })
+    expect(channel.sent[2]).toEqual({
+      type: 'quit-inspection', requestId: 8, activeTasks: true, scheduledTasks: true,
+      error: 'desktop quit: the adopted Web service owns this session',
+    })
+
     let settled = false
     void adopted.then(() => { settled = true })
     await new Promise(resolve => setImmediate(resolve))

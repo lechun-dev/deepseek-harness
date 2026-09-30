@@ -23,6 +23,9 @@ ManifestDPIAware true
     !include "${INSTALLER_SOURCE_DIR}\theme.nsh"
     !include "${INSTALLER_SOURCE_DIR}\pages.nsh"
     !include "${INSTALLER_SOURCE_DIR}\lifecycle.nsh"
+    Function InstallerCheckAppRunning
+      !insertmacro customCheckAppRunning
+    FunctionEnd
   !endif
 !macroend
 
@@ -63,6 +66,7 @@ ManifestDPIAware true
   File "/oname=$PLUGINSDIR\brand-dark.bmp" "${INSTALLER_BUILD_DIR}\brand-dark.bmp"
   File "/oname=$PLUGINSDIR\brand-dark-2x.bmp" "${INSTALLER_BUILD_DIR}\brand-dark-2x.bmp"
   File "/oname=$PLUGINSDIR\window-frame.dll" "${INSTALLER_BUILD_DIR}\window-frame.dll"
+  Call InstallerCheckAppRunning
   ${If} ${Silent}
     Call InstallerPreflight
     ${If} $InstallerError != ""
@@ -84,17 +88,7 @@ ManifestDPIAware true
 !macroend
 
 !macro customUnInstall
-  Push $0
-  ${IfNot} ${isUpdated}
-    ; 2026-09-24 coder(lq): Remove the launcher before app files and its state
-    ; disappear, so dsh.exe, dsh-shim.json, and cli-launcher.json stay atomic.
-    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --remove-cli-launcher' $0
-    ${If} $0 != 0
-      DetailPrint "Command line launcher removal returned $0"
-    ${EndIf}
-  ${EndIf}
   Call un.CleanData
-  Pop $0
 !macroend
 
 !macro customPageAfterChangeDir
@@ -207,7 +201,6 @@ ManifestDPIAware true
 
 !macro customInstall
   Push $0
-  Push $1
   StrCpy $0 0
   ${If} ${Errors}
     StrCpy $0 1
@@ -216,16 +209,10 @@ ManifestDPIAware true
   !insertmacro dshFinishDirectories
   ; Standard uninstall-entry metadata read by inventory tools; the upstream template records it only under its private key.
   WriteRegStr SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}" InstallLocation "$INSTDIR"
-  ; Install and update the CLI in the same user context as this per-user app.
-  ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --install-cli-launcher' $1
-  ${If} $1 != 0
-    DetailPrint "Command line launcher installation returned $1"
-  ${EndIf}
   ${If} $0 == 1
     SetErrors
   ${Else}
     ClearErrors
   ${EndIf}
-  Pop $1
   Pop $0
 !macroend

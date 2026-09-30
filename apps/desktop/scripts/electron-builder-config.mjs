@@ -1,7 +1,8 @@
+import { officePackageDirectories } from '../../../scripts/libreoffice-packages.mjs'
 import { X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -58,7 +59,7 @@ export function createElectronBuilderConfig(
     throw new Error('desktop package: DSH_DESKTOP_UNSIGNED must be 0 or 1')
   }
   const unsigned = env.DSH_DESKTOP_UNSIGNED === '1'
-  // 2026-09-19 coder(lq): unsigned mac packages are local/CI artifacts without Apple Developer ID signing.
+  // 2026-09-30 coder(lq): fork CI produces unsigned macOS artifacts without Apple release credentials.
   if (unsigned && resolvedPlatform !== 'win32' && resolvedPlatform !== 'darwin') {
     throw new Error('desktop package: unsigned builds require Windows or macOS')
   }
@@ -146,9 +147,8 @@ export function createElectronBuilderConfig(
     extraResources: [
       { from: buildPaths.runtime, to: 'runtime' },
       { from: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)), to: 'icon.png' },
-      // The Windows launcher the application installs on PATH: CreateProcess
-      // cannot run a `.cmd`, so this build carries a real executable.
-      ...(resolvedPlatform === 'win32' ? [{ from: join(buildPaths.root, 'cli-shim', 'dsh.exe'), to: 'cli-shim/dsh.exe' }] : []),
+      // Windows tray bitmaps; macOS keeps the Dock and ships no menu bar icon.
+      ...(packagesWindows ? [{ from: fileURLToPath(new URL('../resources/tray-windows.ico', import.meta.url)), to: 'tray.ico' }] : []),
     ],
     mac: {
       icon: fileURLToPath(new URL('../resources/icon-macos.png', import.meta.url)),
@@ -161,6 +161,8 @@ export function createElectronBuilderConfig(
       identity: unsigned ? null : macOSSigning?.signingIdentity,
       forceCodeSigning: !unsigned,
       hardenedRuntime: !unsigned,
+      entitlements: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
+      entitlementsInherit: fileURLToPath(new URL('./macos-entitlements.plist', import.meta.url)),
       // ASAR-unpacked native runtime files are pre-signed; PAK resources are sealed by their enclosing bundle.
       signIgnore: ['/Contents/Resources/app\\.asar\\.unpacked/dsh(?:/|$)', '/Contents/Resources/runtime/primary-runtime(?:/|$)', '\\.pak$'],
       notarize: !unsigned,
@@ -171,6 +173,10 @@ export function createElectronBuilderConfig(
       writeUpdateInfo: false,
     },
     beforePack: async context => {
+      const office = await officePackageDirectories(buildPaths.dsh, { platform: resolvedPlatform, arch: resolvedArch })
+      const patterns = office.map(directory => `**/${relative(buildPaths.dsh, directory).split(sep).join('/')}/**/*`)
+      const existing = context.packager.config.asarUnpack ?? []
+      context.packager.config.asarUnpack = [...(typeof existing === 'string' ? [existing] : existing), ...patterns]
       if (packagesWindows) windowsCode = await prepareWindowsAsarUnpack(context, buildPaths.dsh)
       if (windowsSigner !== undefined) {
         primaryRuntimeDestination = join(context.appOutDir, 'resources', 'runtime', 'primary-runtime')
@@ -203,7 +209,7 @@ export function createElectronBuilderConfig(
         })
         await verifyWindowsAsarUnpack(buildPaths.dsh, context.packager.getResourcesDir(context.appOutDir), windowsCode)
       }
-      // 2026-09-19 coder(lq): unsigned mac skips after-sign verification and DMG notarization.
+      // 2026-09-30 coder(lq): unsigned macOS packages have no signature or notarization to verify.
       if (unsigned || context.electronPlatformName !== 'darwin') return
       const appPath = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
       if (update !== undefined) {
@@ -223,10 +229,7 @@ export function createElectronBuilderConfig(
     win: {
       icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
       forceCodeSigning: !unsigned,
-      // electron-builder signs every .exe under app.asar.unpacked after packaging.
-      // The unsigned Windows smoke test runs after NSIS is built, so leave the
-      // unpacked Office helper binaries byte-for-byte intact while still letting
-      // resedit apply icon/version metadata to the main application executable.
+      // 2026-09-30 coder(lq): keep unsigned Office helpers byte-identical while electron-builder edits the app executable.
       signExecutable: !unsigned,
       signtoolOptions: {
         sign: windowsSigner,

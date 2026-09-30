@@ -1,467 +1,87 @@
-/**
- * Behaviour of the machine-wide `dsh` launcher this application installs:
- * which directory wins, what happens to an existing `dsh`, how installation is
- * verified, and what removal restores.
- */
-
-import { describe, expect, it } from 'vitest'
-import {
-  CLI_LAUNCHER_NAME,
-  cliLauncherName,
-  cliLauncherDirectories,
-  cliLauncherScript,
-  ensureCliLauncher,
-  installCliLauncher,
-  isCliLauncherCurrent,
-  readCliLauncher,
-  removeCliLauncher,
-  type CliLauncherEnvironment,
-  type CliLauncherOperations,
-} from '../src/cli-launcher.ts'
-
-/** In-memory operations: no test touches the real filesystem or prompts. */
-class FakeOperations implements CliLauncherOperations {
-  readonly files = new Map<string, string>()
-  readonly modes = new Map<string, number>()
-  readonly links = new Map<string, string>()
-  readonly directories = new Set<string>()
-  readonly writable = new Set<string>()
-  readonly privileged: string[] = []
-  readonly renames: [string, string][] = []
-  readonly calls: string[] = []
-  report: string | undefined = '0.1.6-alpha.3'
-  probe: string | undefined
-  readonly copies: [string, string][] = []
-  privilegedFailure: Error | undefined
-
-  exists(path: string): boolean { return this.files.has(path) || this.links.has(path) }
-  isDirectory(path: string): boolean { return this.directories.has(path) }
-  isWritableDirectory(path: string): boolean { return this.writable.has(path) }
-  readLink(path: string): string | undefined { return this.links.get(path) }
-  readFile(path: string): string | undefined { return this.files.get(path) }
-  sameFile(first: string, second: string): boolean {
-    const firstContents = this.files.get(first)
-    return firstContents !== undefined && firstContents === this.files.get(second)
-  }
-
-  writeFile(path: string, contents: string, mode: number): void {
-    this.files.set(path, contents)
-    this.modes.set(path, mode)
-    this.calls.push(`write ${path}`)
-  }
-
-  writeLink(path: string, target: string): void {
-    this.links.set(path, target)
-    this.calls.push(`link ${path}`)
-  }
-
-  rename(from: string, to: string): void {
-    const fromFile = this.files.get(from)
-    const fromLink = this.links.get(from)
-    this.files.delete(from)
-    this.links.delete(from)
-    if (fromFile !== undefined) this.files.set(to, fromFile)
-    if (fromLink !== undefined) this.links.set(to, fromLink)
-    this.renames.push([from, to])
-    this.calls.push(`rename ${from} ${to}`)
-  }
-
-  remove(path: string): void {
-    this.files.delete(path)
-    this.links.delete(path)
-    this.calls.push(`remove ${path}`)
-  }
-
-  async runPrivileged(script: string): Promise<void> {
-    this.calls.push('privileged')
-    if (this.privilegedFailure !== undefined) throw this.privilegedFailure
-    this.privileged.push(script)
-  }
-
-  copyFile(from: string, to: string): void {
-    this.copies.push([from, to])
-    this.files.set(to, this.files.get(from) ?? '')
-  }
-
-  async installedVersion(): Promise<string | undefined> { return this.report }
-
-  async probeMultica(): Promise<string | undefined> { return this.probe }
-}
-
-function environment(overrides: Partial<CliLauncherEnvironment> = {}): CliLauncherEnvironment {
-  return {
-    version: '0.1.6-alpha.3',
-    platform: 'darwin',
-    executable: '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
-    cliEntry: '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
-    pathEntries: ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'],
-    stateFile: '/Users/tester/Library/Application Support/dsh-desktop/cli-launcher.json',
-    ...overrides,
-  }
-}
-
-/** A Windows machine, where the only usable directory is the user's alias folder. */
-function windowsEnvironment(overrides: Partial<CliLauncherEnvironment> = {}): CliLauncherEnvironment {
-  return environment({
-    platform: 'win32',
-    executable: 'C:\\Program Files\\DeepSeek Harness\\DeepSeek Harness.exe',
-    cliEntry: 'C:\\Program Files\\DeepSeek Harness\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js',
-    pathEntries: [
-      'C:\\Windows\\system32',
-      'C:\\Windows',
-      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
-    ],
-    stateFile: 'C:\\Users\\tester\\AppData\\Roaming\\dsh-desktop\\cli-launcher.json',
-    ...overrides,
-  })
-}
-
-function usable(): FakeOperations {
-  const operations = new FakeOperations()
-  operations.directories.add('/opt/homebrew/bin')
-  operations.writable.add('/opt/homebrew/bin')
-  return operations
-}
-
-describe('cliLauncherScript', () => {
-  it('runs the bundled entry through the application binary in Node mode', () => {
-    const script = cliLauncherScript(environment())
-    expect(script.startsWith('#!/bin/sh\n')).toBe(true)
-    expect(script).toContain('ELECTRON_RUN_AS_NODE=1 exec')
-    expect(script).toContain("'/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness'")
-    expect(script).toContain(' --expose-internals ')
-    expect(script).toContain('app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js')
-    expect(script.endsWith('"$@"\n')).toBe(true)
-  })
-})
-
-describe('cliLauncherDirectories', () => {
-  it('prefers the conventional directories, then PATH order, without duplicates', () => {
-    expect(cliLauncherDirectories(environment({ pathEntries: ['/usr/bin', '/opt/homebrew/bin', '', '/custom/bin'] }))).toEqual([
-      '/opt/homebrew/bin',
-      '/usr/local/bin',
-      '/usr/bin',
-      '/custom/bin',
-    ])
-  })
-
-  it('keeps only the user alias directory on Windows, never a system directory', () => {
-    expect(cliLauncherDirectories(windowsEnvironment())).toEqual([
-      'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps',
-    ])
-  })
-
-  it('offers no Windows directory when the alias folder is not on PATH', () => {
-    expect(cliLauncherDirectories(windowsEnvironment({ pathEntries: ['C:\\Windows\\system32'] }))).toEqual([])
-  })
-})
-
-describe('installed launcher self-checks', () => {
-  it('reports the Multica bridge answer the launcher returned', async () => {
-    const operations = usable()
-    operations.probe = 'dsh'
-    const result = await installCliLauncher(environment(), operations)
-    expect(result.status === 'installed' && result.probe).toBe('dsh')
-  })
-
-  it('reports nothing when the bridge profile does not answer', async () => {
-    const operations = usable()
-    const result = await installCliLauncher(environment(), operations)
-    expect(result.status === 'installed' && result.probe).toBeUndefined()
-  })
-
-  it('reports an earlier PATH entry that keeps precedence', async () => {
-    const operations = usable()
-    const env = environment({ pathEntries: ['/usr/bin', '/opt/homebrew/bin'] })
-    operations.files.set('/usr/bin/dsh', '#!/bin/sh\necho old\n')
-    const result = await installCliLauncher(env, operations)
-    expect(result.status === 'installed' && result.shadowedBy).toBe('/usr/bin/dsh')
-  })
-})
-
-describe('Windows launcher', () => {
-  it('writes a .cmd that resolves through PATHEXT', () => {
-    const script = cliLauncherScript(windowsEnvironment())
-    expect(script.startsWith('@echo off')).toBe(true)
-    expect(script).toContain('set ELECTRON_RUN_AS_NODE=1')
-    expect(script).toContain('"C:\\Program Files\\DeepSeek Harness\\DeepSeek Harness.exe"')
-    expect(script).toContain(' --expose-internals ')
-    expect(script).toContain(' %*')
-    expect(cliLauncherName('win32')).toBe('dsh.cmd')
-  })
-
-  it('installs into the alias directory and never escalates', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    operations.directories.add(alias)
-    operations.directories.add('C:\\Windows\\system32')
-    operations.writable.add(alias)
-    const env = windowsEnvironment()
-
-    const result = await installCliLauncher(env, operations)
-    expect(result).toEqual({ status: 'installed', path: `${alias}\\dsh.cmd`, version: env.version })
-    expect(operations.privileged).toEqual([])
-    expect(operations.files.has('C:\\Windows\\system32\\dsh')).toBe(false)
-  })
-
-
-  it('installs the shipped executable plus its target file instead of a .cmd', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    operations.directories.add(alias)
-    operations.writable.add(alias)
-    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
-    operations.files.set(shim, 'MZ...')
-    operations.probe = 'dsh'
-    const env = windowsEnvironment({ shimSource: shim })
-
-    const result = await installCliLauncher(env, operations)
-    expect(result.status).toBe('installed')
-    expect(operations.copies).toEqual([[shim, alias + '\\dsh.exe']])
-    expect(operations.files.get(alias + '\\dsh-shim.json')).toContain('cliEntry')
-    expect(result.status === 'installed' && result.probe).toBe('dsh')
-  })
-
-  it('repairs an orphaned bundled shim without preserving the broken copy', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
-    operations.directories.add(alias)
-    operations.writable.add(alias)
-    operations.files.set(shim, 'MZ bundled shim')
-    operations.files.set(`${alias}\\dsh.exe`, 'MZ bundled shim')
-    const env = windowsEnvironment({ shimSource: shim })
-
-    const result = await ensureCliLauncher(env, operations)
-
-    expect(result.status).toBe('installed')
-    expect(operations.renames).toEqual([])
-    expect(operations.files.has(`${alias}\\dsh.exe.${env.version}.bak`)).toBe(false)
-    expect(JSON.parse(operations.files.get(`${alias}\\dsh-shim.json`) ?? '{}')).toMatchObject({ cliEntry: env.cliEntry })
-    expect(readCliLauncher(env, operations)?.configPath).toBe(`${alias}\\dsh-shim.json`)
-  })
-
-  it('reports no-directory instead of escalating when the alias directory is read-only', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    operations.directories.add(alias)
-    operations.directories.add('C:\\Windows\\system32')
-    operations.writable.add('C:\\Windows\\system32')
-
-    expect(await installCliLauncher(windowsEnvironment(), operations)).toEqual({ status: 'no-directory' })
-    expect(operations.privileged).toEqual([])
-    expect(operations.files.size).toBe(0)
-  })
-})
-
-describe('ensureCliLauncher', () => {
-  it('keeps a complete current Windows installation unchanged', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
-    operations.directories.add(alias)
-    operations.writable.add(alias)
-    operations.files.set(shim, 'MZ...')
-    const env = windowsEnvironment({ shimSource: shim })
-    await installCliLauncher(env, operations)
-    operations.calls.length = 0
-    operations.copies.length = 0
-
-    expect(isCliLauncherCurrent(env, operations)).toBe(true)
-    expect(await ensureCliLauncher(env, operations)).toEqual({
-      status: 'unchanged', path: `${alias}\\dsh.exe`, version: env.version,
-    })
-    expect(operations.calls).toEqual([])
-    expect(operations.copies).toEqual([])
-  })
-
-  it('reinstalls when the Windows shim config is missing', async () => {
-    const operations = new FakeOperations()
-    const alias = 'C:\\Users\\tester\\AppData\\Local\\Microsoft\\WindowsApps'
-    const shim = 'C:\\Program Files\\DeepSeek Harness\\resources\\cli-shim\\dsh.exe'
-    operations.directories.add(alias)
-    operations.writable.add(alias)
-    operations.files.set(shim, 'MZ...')
-    const env = windowsEnvironment({ shimSource: shim })
-    await installCliLauncher(env, operations)
-    operations.remove(`${alias}\\dsh-shim.json`)
-
-    expect(isCliLauncherCurrent(env, operations)).toBe(false)
-    expect((await ensureCliLauncher(env, operations)).status).toBe('installed')
-    expect(JSON.parse(operations.files.get(`${alias}\\dsh-shim.json`) ?? '{}')).toMatchObject({ executable: env.executable })
-  })
-
-  it('reinstalls when the recorded application version is stale', async () => {
-    const operations = usable()
-    const old = environment({ version: '0.1.5-rc.2' })
-    await installCliLauncher(old, operations)
-    const current = environment()
-
-    expect(isCliLauncherCurrent(current, operations)).toBe(false)
-    expect((await ensureCliLauncher(current, operations)).status).toBe('installed')
-    expect(readCliLauncher(current, operations)?.version).toBe(current.version)
-  })
-})
-
-describe('installCliLauncher', () => {
-  it('writes an executable launcher, records it, and verifies the version', async () => {
-    const operations = usable()
-    const env = environment()
-    const result = await installCliLauncher(env, operations)
-
-    expect(result).toEqual({ status: 'installed', path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`, version: env.version })
-    expect(operations.modes.get(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`)).toBe(0o755)
-    expect(readCliLauncher(env, operations)).toEqual({ version: env.version, path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}` })
-  })
-
-  it('skips a preferred directory the user cannot write', async () => {
-    const operations = usable()
-    operations.writable.delete('/opt/homebrew/bin')
-    operations.directories.add('/usr/local/bin')
-    operations.writable.add('/usr/local/bin')
-
-    const result = await installCliLauncher(environment(), operations)
-    expect(result.status).toBe('installed')
-    expect(result.status === 'installed' && result.path).toBe(`/usr/local/bin/${CLI_LAUNCHER_NAME}`)
-    expect(operations.privileged).toEqual([])
-  })
-
-  it('falls back to one privileged write when no directory is writable', async () => {
-    const operations = usable()
-    operations.writable.clear()
-    const result = await installCliLauncher(environment(), operations)
-
-    expect(result.status).toBe('installed')
-    expect(operations.calls).toContain('privileged')
-    const script = operations.privileged[0]!
-    expect(script).toContain(`cat > '/opt/homebrew/bin/${CLI_LAUNCHER_NAME}' <<'DSH_LAUNCHER'`)
-    expect(script).toContain(`chmod 755 '/opt/homebrew/bin/${CLI_LAUNCHER_NAME}'`)
-    expect(script).toContain('ELECTRON_RUN_AS_NODE=1 exec')
-  })
-
-  it('reports cancellation of the authorization prompt as a failure', async () => {
-    const operations = usable()
-    operations.writable.clear()
-    operations.privilegedFailure = new Error('User canceled.')
-    await expect(installCliLauncher(environment(), operations)).rejects.toThrow('User canceled.')
-  })
-
-  it('reports no-directory when nothing on PATH exists', async () => {
-    const operations = usable()
-    operations.directories.clear()
-    expect(await installCliLauncher(environment(), operations)).toEqual({ status: 'no-directory' })
-  })
-
-  it('leaves an identical launcher untouched', async () => {
-    const operations = usable()
-    const env = environment()
-    operations.files.set(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`, cliLauncherScript(env))
-    operations.calls.length = 0
-
-    expect(await installCliLauncher(env, operations)).toEqual({
-      status: 'unchanged', path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`, version: env.version,
-    })
-    expect(operations.calls).toEqual([])
-  })
-
-  it('replaces an existing symlink without writing through it', async () => {
-    const operations = usable()
-    const env = environment()
-    const path = `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`
-    operations.links.set(path, '/somewhere/else/dsh')
-
-    const result = await installCliLauncher(env, operations)
-    expect(result).toEqual({
-      status: 'installed', path, version: env.version,
-      replaced: { kind: 'symlink', target: '/somewhere/else/dsh' },
-    })
-    expect(operations.links.has(path)).toBe(false)
-    expect(operations.files.get(path)).toBe(cliLauncherScript(env))
-    expect(operations.calls.indexOf(`remove ${path}`)).toBeLessThan(operations.calls.indexOf(`write ${path}`))
-  })
-
-  it('preserves a regular file that already owned the name', async () => {
-    const operations = usable()
-    const env = environment()
-    const path = `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`
-    operations.files.set(path, '#!/bin/sh\necho old\n')
-
-    const result = await installCliLauncher(env, operations)
-    expect(result).toEqual({
-      status: 'installed', path, version: env.version,
-      replaced: { kind: 'file', backup: `${path}.${env.version}.bak` },
-    })
-    expect(operations.files.get(`${path}.${env.version}.bak`)).toBe('#!/bin/sh\necho old\n')
-  })
-
-  it('records a launcher whose verification failed so it can still be removed', async () => {
-    const operations = usable()
-    const env = environment()
-    operations.report = '0.1.5-rc.2'
-
-    expect(await installCliLauncher(env, operations)).toEqual({ status: 'unavailable', path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}` })
-    expect(readCliLauncher(env, operations)?.path).toBe(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`)
-  })
-})
-
-describe('removeCliLauncher', () => {
-  it('reports nothing to do without a recorded installation', () => {
-    expect(removeCliLauncher(environment(), usable())).toEqual({ status: 'absent' })
-  })
-
-  it('removes the launcher and restores the symlink it replaced', async () => {
-    const operations = usable()
-    const env = environment()
-    const path = `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`
-    operations.links.set(path, '/somewhere/else/dsh')
-    await installCliLauncher(env, operations)
-
-    expect(removeCliLauncher(env, operations)).toEqual({ status: 'removed', path, restored: '/somewhere/else/dsh' })
-    expect(operations.links.get(path)).toBe('/somewhere/else/dsh')
-    expect(readCliLauncher(env, operations)).toBeUndefined()
-  })
-
-  it('restores the file it moved aside', async () => {
-    const operations = usable()
-    const env = environment()
-    const path = `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`
-    operations.files.set(path, '#!/bin/sh\necho old\n')
-    await installCliLauncher(env, operations)
-
-    expect(removeCliLauncher(env, operations)).toEqual({ status: 'removed', path, restored: path })
-    expect(operations.files.get(path)).toBe('#!/bin/sh\necho old\n')
-  })
-
-  it('clears its record when the launcher disappeared on its own', async () => {
-    const operations = usable()
-    const env = environment()
-    await installCliLauncher(env, operations)
-    operations.remove(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`)
-
-    expect(removeCliLauncher(env, operations)).toEqual({ status: 'removed', path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}` })
-    expect(readCliLauncher(env, operations)).toBeUndefined()
-  })
-
-  it('refuses to remove a directory that took the name', async () => {
-    const operations = usable()
-    const env = environment()
-    await installCliLauncher(env, operations)
-    operations.files.delete(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`)
-    operations.directories.add(`/opt/homebrew/bin/${CLI_LAUNCHER_NAME}`)
-
-    expect(removeCliLauncher(env, operations)).toEqual({ status: 'unavailable', path: `/opt/homebrew/bin/${CLI_LAUNCHER_NAME}` })
-  })
-})
-
-describe('readCliLauncher', () => {
-  it('treats unreadable records as no installation', () => {
-    const operations = usable()
-    const env = environment()
-    for (const text of ['{', 'null', '{"version":1,"path":"/x"}', '{"version":"1","path":"/x","replaced":{"kind":"other"}}']) {
-      operations.files.set(env.stateFile, text)
-      expect(readCliLauncher(env, operations)).toBeUndefined()
+/** Installed launcher scripts preserve terminal invocation through a minimal runtime fixture. */
+
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative } from 'node:path'
+import { expect, it, onTestFinished } from 'vitest'
+import { prepareDesktopCli } from '../scripts/prepare-cli.ts'
+
+function fixture() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-cli-launcher-')))
+  const children: ChildProcessWithoutNullStreams[] = []
+  const exits: Promise<unknown>[] = []
+  onTestFinished(async () => {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     }
-    operations.files.set(env.stateFile, JSON.stringify({ version: '1', path: '/x', replaced: { kind: 'file' } }))
-    expect(readCliLauncher(env, operations)).toBeUndefined()
+    await Promise.allSettled(exits)
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   })
+  const application = join(root, 'Application 中文 with spaces.app')
+  const platform = process.platform === 'win32' ? 'win32' : 'darwin'
+  const resources = join(application, ...platform === 'darwin' ? ['Contents', 'Resources'] : ['resources'])
+  const cli = join(resources, 'runtime', 'cli')
+  prepareDesktopCli(cli, platform)
+  const electron = join(application, ...platform === 'darwin' ? ['Contents', 'MacOS', 'DeepSeek Harness'] : ['DeepSeek Harness.exe'])
+  mkdirSync(dirname(electron), { recursive: true })
+  if (platform === 'win32') copyFileSync(process.execPath, electron)
+  else symlinkSync(process.execPath, electron)
+  const entry = join(resources, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js')
+  mkdirSync(dirname(entry), { recursive: true })
+  writeFileSync(join(dirname(entry), 'package.json'), '{"type":"module"}\n')
+  writeFileSync(entry, [
+    'const chunks = []',
+    'for await (const chunk of process.stdin) chunks.push(chunk)',
+    "process.stdout.write(JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), value: process.env.DSH_CLI_TEST_VALUE, nodeMode: process.env.ELECTRON_RUN_AS_NODE, input: Buffer.concat(chunks).toString('hex') }))",
+    "process.stderr.write('separate stderr\\n')",
+    'process.exitCode = 23',
+    '',
+  ].join('\n'))
+  const command = join(cli, 'bin', platform === 'win32' ? 'dsh.cmd' : 'dsh')
+  function start(args: string[], executable = command) {
+    // cmd fixture inputs contain no metacharacters; POSIX cases exercise literal expansion characters separately.
+    const child = platform === 'win32'
+      ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${executable}" ${args.map(value => `"${value}"`).join(' ')}"`], {
+        cwd: root, env: { ...process.env, DSH_CLI_TEST_VALUE: 'kept' }, stdio: 'pipe', windowsVerbatimArguments: true,
+      })
+      : spawn(executable, args, { cwd: root, env: { ...process.env, DSH_CLI_TEST_VALUE: 'kept' }, stdio: 'pipe' })
+    children.push(child)
+    const closed = new Promise<number | null>((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', resolve)
+    })
+    exits.push(closed)
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8').on('data', (text: string) => { stdout += text })
+    child.stderr.setEncoding('utf8').on('data', (text: string) => { stderr += text })
+    return { child, closed, stdout: () => stdout, stderr: () => stderr }
+  }
+  return { root, command, start }
+}
+
+it('preserves common arguments, cwd, environment, binary input, stderr and exit status', async () => {
+  const f = fixture()
+  const args = ['plugin', '--profile', 'desktop', 'hello world', '中文 🚀', '']
+  const run = f.start(args)
+  const input = Buffer.from([0, 1, 10, 255])
+  run.child.stdin.end(input)
+  expect(await run.closed, run.stderr()).toBe(23)
+  expect(JSON.parse(run.stdout())).toEqual({ args, cwd: f.root, value: 'kept', nodeMode: '1', input: input.toString('hex') })
+  expect(run.stderr()).toBe('separate stderr\n')
+})
+
+it.skipIf(process.platform === 'win32')('resolves chained command symlinks without expanding argument contents', async () => {
+  const f = fixture()
+  const link = join(f.root, 'command-link')
+  const command = join(f.root, 'dsh')
+  symlinkSync(relative(f.root, f.command), link)
+  symlinkSync(link, command)
+  const args = ['quote"inside', 'trailing\\', '%PATH%', '$HOME', '`literal`', '']
+  const run = f.start(args, command)
+  run.child.stdin.end()
+  expect(await run.closed, run.stderr()).toBe(23)
+  expect(JSON.parse(run.stdout())).toMatchObject({ args, cwd: f.root, nodeMode: '1' })
 })

@@ -1,23 +1,14 @@
 /** Built Desktop Host lifecycle with Electron disconnecting before profile startup settles. */
 
 import { fork } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { finished } from 'node:stream/promises'
 import { expect, it, onTestFinished } from 'vitest'
 
-/** The listen record a sibling Web service publishes on this Harness home. */
-const published = {
-  version: 1,
-  pid: 84690,
-  port: 3080,
-  url: 'http://127.0.0.1:3080/?token=shared',
-  injections: [{ kind: 'global', name: 'agent', value: 'worker' }],
-}
-
-it.each([[false, false], [true, false], [false, true]] as const)('settles startup after parent IPC disconnect (fail: %s, adopted: %s)', async (fail, adopted) => {
+it.each([false, true])('settles startup after parent IPC disconnect (boot failure: %s)', async (fail) => {
   const root = mkdtempSync(join(tmpdir(), 'desktop-disconnect-'))
   const modules = join(root, 'node_modules', '@deepseek-ai')
   const hostDirectory = fileURLToPath(new URL('../../desktop-host/', import.meta.url))
@@ -37,8 +28,11 @@ it.each([[false, false], [true, false], [false, true]] as const)('settles startu
   }
   writeFileSync(join(root, 'package.json'), '{"type":"module"}')
   writeFileSync(join(modules, 'dsh-app-boot', 'package.json'), '{"type":"module","exports":"./index.js"}')
-  writeFileSync(join(modules, 'dsh-app-boot', 'index.js'), `export const loadProfileDirectory = () => ({}); export const loadLayeredEnv = () => ({});
-    export const probeWebListen = async () => (${adopted ? JSON.stringify(published) : 'undefined'})`)
+  writeFileSync(join(modules, 'dsh-app-boot', 'index.js'), `
+    export const loadProfileDirectory = () => ({ skippedBundles: [] });
+    export const reportSkippedBundles = () => {};
+    export const loadLayeredEnv = () => ({});
+  `)
   writeFileSync(join(modules, 'dsh', 'package.json'), '{"type":"module","exports":{"./profile-boot":"./profile-boot.js"}}')
   writeFileSync(join(modules, 'dsh', 'profile-boot.js'), `
     import { writeFileSync } from 'node:fs';
@@ -47,7 +41,7 @@ it.each([[false, false], [true, false], [false, true]] as const)('settles startu
       return new Promise((resolve, reject) => process.once('disconnect', () => {
         if (${String(fail)}) { reject(new Error('fixture boot failure')); return; }
         resolve({ ctx: { plugin: async () => {}, effect: () => {}, on: () => {}, inject: () => {},
-          connection: { authenticatedUrl: value => value }, webServer: { port: 3080 } },
+          connection: { authenticatedUrl: value => value }, webServer: { port: 19387 } },
           shutdown: { shutdown: async () => writeFileSync(${JSON.stringify(join(root, 'stopped'))}, 'stopped') } });
       }));
     }
@@ -67,24 +61,13 @@ it.each([[false, false], [true, false], [false, true]] as const)('settles startu
     rmSync(root, { recursive: true, force: true })
   })
   try {
-    const first = await new Promise<Record<string, unknown>>((resolve, reject) => {
+    const boot = await new Promise<{
+      packageManager: { command: string; args: string[]; env: Record<string, string> }
+    }>((resolve, reject) => {
       child.once('message', resolve)
       child.once('error', reject)
-      child.once('exit', (code) => { reject(new Error(`Host exited before reporting: ${String(code)} ${stderr}`)) })
+      child.once('exit', (code) => { reject(new Error(`Host exited before booting: ${String(code)} ${stderr}`)) })
     })
-    if (adopted) {
-      // The published service is reported verbatim, and this child boots nothing:
-      // no package manager transaction, no profile, so no shutdown handshake.
-      expect(first).toEqual({ type: 'ready', url: published.url, injections: published.injections, attached: true })
-      child.disconnect()
-      expect(await exited).toBe(0)
-      await drained
-      expect(stderr).not.toContain('ERR_IPC_CHANNEL_CLOSED')
-      expect(stderr).not.toContain('Unhandled')
-      expect(existsSync(join(root, 'stopped'))).toBe(false)
-      return
-    }
-    const boot = first as { packageManager: { command: string; args: string[]; env: Record<string, string> } }
     expect(boot.packageManager.command).toBe(process.execPath)
     expect(boot.packageManager.args).toEqual(['--expose-internals', pnpm])
     expect(boot.packageManager.env.ELECTRON_RUN_AS_NODE).toBe('1')
