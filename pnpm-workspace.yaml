@@ -18,6 +18,8 @@ overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # 2026-09-30 coder(lq): Keep Markdown extension types unified across Windows pnpm layouts.
+  'micromark-util-types': '2.0.3'
 
 peerDependencyRules:
   allowedVersions:
