@@ -2,7 +2,9 @@
  * Web runtime glue behavior: dist resolution through the bundle's own hook,
  * the frontend-static child claiming the fallback seat, the web-surface
  * prompt section and bash runtime variables, and readiness publication through
- * the URL line and default-browser handoff.
+ * the URL line and default-browser handoff. The advertised URL comes from this
+ * plugin's `publicUrl` config (loopback when unset), never from the bound
+ * webserver.
  */
 
 import { EventEmitter } from 'node:events'
@@ -92,9 +94,10 @@ function fakeHttpServer(
 /** Deterministic Host Connection face for URL publication and frontend injection. */
 function provideConnection(ctx: Context): void {
   ctx.provide('connection', {
+    // Adds the process token to the given canonical root, preserving any
+    // public mount prefix the caller passed.
     authenticatedUrl(baseUrl: string) {
       const url = new URL(baseUrl)
-      url.pathname = '/'
       url.searchParams.set('token', 'test-token')
       return url.href
     },
@@ -169,6 +172,48 @@ describe('web-app runtime glue', () => {
     await ctx.fiber.dispose()
   })
 
+  it('advertises and opens the configured public root behind a prefix-stripping proxy', async () => {
+    stageDist()
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    const { server } = fakeHttpServer()
+    ctx.provide('webServer', server)
+    provideConnection(ctx)
+    const contributions: BashContribution[] = []
+    ctx.provide('shellEnv', {
+      register: (contribution: BashContribution) => {
+        contributions.push(contribution)
+        return () => {}
+      },
+    } as never)
+    provideLoader(ctx)
+    const lifecycle: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((message) => { lifecycle.push(String(message)) })
+    const openBrowser = vi.fn(async (url: string) => { lifecycle.push(`open:${url}`) })
+    internals.openBrowser = openBrowser
+    apply(ctx, new Config({
+      openBrowser: true,
+      printUrl: true,
+      surfaceContext: true,
+      publicUrl: 'https://proxy.example:8443/web',
+      trustedHosts: ['proxy.example:8443'],
+    }))
+    await ctx.plugin(SystemPrompt, { personaPrefix: '' })
+    await vi.waitFor(() => { expect(openBrowser).toHaveBeenCalled() })
+
+    expect(lifecycle).toEqual([
+      'dsh web: https://proxy.example:8443/web/?token=test-token',
+      'dsh web: opening the default browser; pass --no-open to disable',
+      'open:https://proxy.example:8443/web/?token=test-token',
+    ])
+    const assembly = await ctx.systemPrompt.assemble()
+    const section = assembly.sections.find(entry => entry.name === 'app:web-surface')
+    expect(section?.text).toContain('https://proxy.example:8443/web/')
+    expect(section?.text).not.toContain('127.0.0.1')
+    const urlContribution = contributions.find(contribution => contribution.name === 'web-runtime')
+    expect(urlContribution?.resolve()).toEqual({ DSH_WEB_URL: 'https://proxy.example:8443/web/' })
+  })
+
   it('publishes no readiness side effect when printing and browser opening are disabled', async () => {
     stageDist()
     const ctx = new Context()
@@ -222,7 +267,8 @@ describe('web-app runtime glue', () => {
     await ctx.fiber.dispose()
   })
 
-  it('publishes the shared listen record and clears it on teardown', async () => {
+  // 2026-10-08 coder(lq): A proxy URL must not redirect Desktop adoption away from the local Web service.
+  it.each([undefined, 'https://proxy.example/web'])('publishes a local shared listen record with publicUrl=%s and clears it on teardown', async (publicUrl) => {
     stageDist()
     const home = mkdtempSync(join(tmpdir(), 'dsh-web-listen-'))
     onTestFinished(() => { rmSync(home, { recursive: true, force: true }) })
@@ -230,7 +276,10 @@ describe('web-app runtime glue', () => {
     ctx.provide('dshHomePath', (...segments: string[]) => join(home, ...segments))
     ctx.provide('webServer', fakeHttpServer('127.0.0.1', [{ kind: 'global', name: 'agent', value: 'worker' }]).server)
     provideConnection(ctx)
-    apply(ctx, new Config({ openBrowser: false, printUrl: false, surfaceContext: false, trustedHosts: [] }))
+    apply(ctx, new Config({
+      openBrowser: false, printUrl: false, surfaceContext: false,
+      ...(publicUrl === undefined ? {} : { publicUrl }), trustedHosts: [],
+    }))
     await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(AppBoot.readWebListen(home)).toEqual({
@@ -262,6 +311,17 @@ describe('web-app runtime glue', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(log).toHaveBeenCalledTimes(1)
     await ctx.fiber.dispose()
+  })
+
+  it('advertises the loopback URL when the composition sets publicUrl to null', async () => {
+    stageDist()
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    ctx.provide('webServer', fakeHttpServer().server)
+    provideConnection(ctx)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: false, publicUrl: null as never, trustedHosts: [] }))
+    await vi.waitFor(() => { expect(log).toHaveBeenCalledWith('dsh web: http://127.0.0.1:4567/?token=test-token') })
   })
 
   it.each([

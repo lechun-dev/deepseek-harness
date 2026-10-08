@@ -1,6 +1,37 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write integrations/multica-subprocess-env/README.md
-README.md: c561e6bb656f642a710049a72c4c591540b24570
-README.zh.md: b66f4dd4facda239fb0df2c5b0215ec2725ea613
+/lechun-dev-dsh-multica-subprocess-env:
+  en: 598b9a5fd0498559
+  zh: 1a49add7048f4d79
+/lechun-dev-dsh-multica-subprocess-env/summary:
+  en: 760aa4fcb1f9c787
+  zh: bef961e4dafcd226
+/lechun-dev-dsh-multica-subprocess-env/table-of-contents:
+  en: 76bc1a09e3dff530
+  zh: 7298ef8769d8b367
+/lechun-dev-dsh-multica-subprocess-env/why-it-exists:
+  en: a5078de10f007082
+  zh: 39dc30ab7bc1dff8
+/lechun-dev-dsh-multica-subprocess-env/install:
+  en: 746aa5461c9416b5
+  zh: bef4b5675aad8a92
+/lechun-dev-dsh-multica-subprocess-env/wire-it-into-a-profile:
+  en: a2b6e312dfc25bc8
+  zh: 72cf373737872e77
+/lechun-dev-dsh-multica-subprocess-env/verify:
+  en: 85de7858b356950b
+  zh: c0df85f1bafd006b
+/lechun-dev-dsh-multica-subprocess-env/how-it-works:
+  en: 0744263b62135dae
+  zh: 6b976c53a8ea73d7
+/lechun-dev-dsh-multica-subprocess-env/develop:
+  en: 7a9aee8694c9d5e0
+  zh: 842a08a20a223151
+/lechun-dev-dsh-multica-subprocess-env/known-limitations-and-deferred-work:
+  en: f4614bf906e8e3d2
+  zh: b1eeb8d4d8d38b23
+/lechun-dev-dsh-multica-subprocess-env/dev-note:
+  en: 36ecadbc38df948b
+  zh: 9a07483934caf174
